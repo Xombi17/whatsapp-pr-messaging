@@ -61,3 +61,36 @@ whatsapp_sender_*.log
 .env
 .env.local
 .env.*.local
+
+# Chrome and browser related
+chromedriver.exe
+chromedriver
+chrome_profile/
+*.crx
+*.pem
+*.der
+*.crt
+*.key
+*.p12
+*.pfx
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+*.backup
+*.old
+*.orig
+
+# System files
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.lnk
+
+# Logs and debugging
+*.log
+logs/
+debug/
+trace/
