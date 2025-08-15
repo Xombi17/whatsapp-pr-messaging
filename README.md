@@ -19,6 +19,7 @@ A robust, automated WhatsApp bulk messaging tool built with Python and Selenium.
 
 - Python 3.8 or higher
 - Google Chrome browser
+- ChromeDriver (matching your Chrome version)
 - Google Sheets with contact data
 
 ### Installation
@@ -34,12 +35,20 @@ A robust, automated WhatsApp bulk messaging tool built with Python and Selenium.
    pip install -r requirements.txt
    ```
 
-3. **Prepare your Google Sheet:**
+3. **Setup ChromeDriver:**
+   - Download ChromeDriver from [https://chromedriver.chromium.org/](https://chromedriver.chromium.org/)
+   - Choose the version that matches your Chrome browser version
+   - Extract the `chromedriver.exe` file
+   - Place `chromedriver.exe` in the same folder as `whatsapp_bulk.py`
+   - **Note**: The script will automatically use the local `chromedriver.exe` if available
+   - **Verify**: Your folder should contain both `whatsapp_bulk.py` and `chromedriver.exe`
+
+4. **Prepare your Google Sheet:**
    - Create a Google Sheet with columns: `Number`, `IntroMessage`, `Name` (optional)
    - Make it publicly accessible via CSV export
    - Update the `GOOGLE_SHEET_CSV_URL` in the script
 
-4. **Run the script:**
+5. **Run the script:**
    ```bash
    python whatsapp_bulk.py
    ```
@@ -99,7 +108,10 @@ The script sends:
 
 1. **Chrome Driver Issues:**
    - Ensure Chrome browser is updated
+   - Verify `chromedriver.exe` is in the same folder as the script
+   - Check that ChromeDriver version matches your Chrome browser version
    - Delete `chrome_profile` folder if authentication fails
+   - **Windows users**: Make sure `chromedriver.exe` is not blocked by Windows Defender
 
 2. **WhatsApp Web Issues:**
    - Check internet connection
