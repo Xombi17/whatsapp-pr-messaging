@@ -12,6 +12,7 @@ A robust, automated WhatsApp bulk messaging tool built with Python and Selenium.
 - **Comprehensive Logging**: Detailed logs for monitoring and debugging
 - **Cross-platform**: Works on Windows, macOS, and Linux
 - **No Contact Saving**: Sends messages without saving numbers to contacts
+- **Text-Only Messages**: Currently supports text messages (no attachments)
 
 ## 🚀 Quick Start
 
@@ -27,7 +28,7 @@ A robust, automated WhatsApp bulk messaging tool built with Python and Selenium.
 1. **Clone the repository:**
    ```bash
    git clone <your-repo-url>
-   cd whatsappsender2
+   cd whatsapp-bulk-messenger
    ```
 
 2. **Install dependencies:**
@@ -84,6 +85,8 @@ Your Google Sheet should have these columns:
 | 919876543210 | Hello! This is our announcement... | John Doe |
 | 919876543211 | Hello! This is our announcement... | Jane Smith |
 
+**Important**: Phone numbers should be in international format without the '+' symbol (e.g., 919876543210 for India, 447123456789 for UK).
+
 ## 🔧 How It Works
 
 1. **Data Loading**: Fetches contact data from Google Sheets
@@ -99,7 +102,7 @@ Your Google Sheet should have these columns:
 
 The script sends:
 - **Intro Message**: Personalized message from your Google Sheet
-- **No Attachments**: Currently configured for text-only messages
+- **Text Only**: Currently configured for text-only messages (no PDFs, images, or documents)
 - **Smart Fallbacks**: Multiple methods to open chats if one fails
 
 ## 🛠️ Troubleshooting
@@ -182,6 +185,19 @@ If you encounter issues:
 - [ ] Analytics dashboard
 - [ ] Multi-account support
 - [ ] API endpoints
+
+## 📁 Project Structure
+
+```
+whatsapp-bulk-messenger/
+├── whatsapp_bulk.py          # Main script
+├── chromedriver.exe          # ChromeDriver executable (user adds this)
+├── README.md                 # This documentation
+├── requirements.txt          # Python dependencies
+├── LICENSE                   # MIT License
+├── .gitignore               # Git ignore rules
+└── setup.py                 # Python package setup
+```
 
 ---
 
