@@ -56,7 +56,7 @@ BATCH_DELAY = 20  # Seconds to wait between batches
 PERSISTENT_PROFILE_DIR = r"./chrome_profile"
 MAX_RETRIES = int(os.environ.get('MAX_RETRIES', '2'))
 CHAT_LOAD_TIMEOUT = int(os.environ.get('CHAT_LOAD_TIMEOUT', '20'))
-MESSAGE_SEND_TIMEOUT = int(os.environ.get('MESSAGE_SEND_TIMEOUT', '5'))
+MESSAGE_SEND_TIMEOUT = int(os.environ.get('MESSAGE_SEND_TIMEOUT', '2'))
 WHATSAPP_LOAD_TIMEOUT = int(os.environ.get('WHATSAPP_LOAD_TIMEOUT', '45'))
 
 # Duplicate prevention
@@ -705,11 +705,13 @@ def main():
     except Exception as e:
         logging.error(f"Unexpected error: {str(e)}")
     finally:
-        logging.info("Closing browser...")
-        try:
-            driver.quit()
-        except:
-            pass
+        logging.info("Campaign completed. Browser will remain open for manual review.")
+        logging.info("You can manually close the browser when you're done.")
+        # Keep browser open - don't call driver.quit()
+        # try:
+        #     driver.quit()
+        # except:
+        #     pass
 
 if __name__ == "__main__":
     main()
