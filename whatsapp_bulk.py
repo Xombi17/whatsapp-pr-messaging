@@ -52,7 +52,7 @@ DELAY_BETWEEN_CONTACTS = (
     int(os.environ.get('DELAY_MAX', '5')),
 )
 BATCH_SIZE = 5  # Number of contacts to process before taking a break
-BATCH_DELAY = 30  # Seconds to wait between batches
+BATCH_DELAY = 20  # Seconds to wait between batches
 PERSISTENT_PROFILE_DIR = r"./chrome_profile"
 MAX_RETRIES = int(os.environ.get('MAX_RETRIES', '2'))
 CHAT_LOAD_TIMEOUT = int(os.environ.get('CHAT_LOAD_TIMEOUT', '20'))
