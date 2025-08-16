@@ -51,11 +51,20 @@ DELAY_BETWEEN_CONTACTS = (
     int(os.environ.get('DELAY_MIN', '2')),
     int(os.environ.get('DELAY_MAX', '5')),
 )
+BATCH_SIZE = 5  # Number of contacts to process before taking a break
+BATCH_DELAY = 30  # Seconds to wait between batches
 PERSISTENT_PROFILE_DIR = r"./chrome_profile"
 MAX_RETRIES = int(os.environ.get('MAX_RETRIES', '2'))
 CHAT_LOAD_TIMEOUT = int(os.environ.get('CHAT_LOAD_TIMEOUT', '20'))
 MESSAGE_SEND_TIMEOUT = int(os.environ.get('MESSAGE_SEND_TIMEOUT', '5'))
 WHATSAPP_LOAD_TIMEOUT = int(os.environ.get('WHATSAPP_LOAD_TIMEOUT', '45'))
+
+# Duplicate prevention
+SENT_MESSAGES_LOG = f"sent_messages_{datetime.now().strftime('%Y%m%d')}.log"
+CHECK_DUPLICATES = True  # Set to False to disable duplicate checking
+
+# Data balancing
+AUTO_BALANCE_DATA = True  # Set to False to disable automatic data balancing
 
 # More robust CONTACT_LIMIT handling
 try:
@@ -376,11 +385,165 @@ def send_message(driver, message, retry_count=0):
             logging.error(f"FAILED: Could not send message after {MAX_RETRIES} attempts - {str(e)}")
             return False
 
+def show_batch_progress(current_batch, total_batches, contacts_in_current_batch, total_contacts):
+    """Show progress information for the current batch"""
+    logging.info(f"📊 BATCH PROGRESS: {current_batch}/{total_batches}")
+    logging.info(f"📱 Contacts in current batch: {contacts_in_current_batch}/{BATCH_SIZE}")
+    logging.info(f"📈 Overall progress: {total_contacts} contacts processed")
+
 def random_delay():
     """Generate random delay between contacts to appear more human-like"""
     delay = random.randint(DELAY_BETWEEN_CONTACTS[0], DELAY_BETWEEN_CONTACTS[1])
     logging.info(f"Waiting {delay} seconds before next contact...")
     time.sleep(delay)
+
+def batch_delay():
+    """Wait between batches"""
+    logging.info(f"⏸️  BATCH BREAK: Waiting {BATCH_DELAY} seconds...")
+    for remaining in range(BATCH_DELAY, 0, -1):
+        if remaining % 10 == 0 or remaining <= 5:  # Show countdown every 10 seconds or last 5 seconds
+            logging.info(f"⏳ Resuming in {remaining} seconds...")
+        time.sleep(1)
+    logging.info("▶️  Resuming with next batch...")
+
+def load_sent_messages():
+    """Load the list of contacts that have already received intro messages"""
+    sent_contacts = set()
+    try:
+        if os.path.exists(SENT_MESSAGES_LOG):
+            with open(SENT_MESSAGES_LOG, 'r', encoding='utf-8') as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith('#'):
+                        # Format: timestamp|number|name|message_preview
+                        parts = line.split('|')
+                        if len(parts) >= 2:
+                            sent_contacts.add(parts[1])  # Add phone number
+            logging.info(f"Loaded {len(sent_contacts)} previously sent contacts from log")
+        else:
+            logging.info("No previous sent messages log found - starting fresh")
+    except Exception as e:
+        logging.warning(f"Error loading sent messages log: {str(e)}")
+        logging.info("Starting with empty sent messages list")
+    
+    return sent_contacts
+
+def save_sent_message(number, name, message_preview):
+    """Save a contact to the sent messages log"""
+    try:
+        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        log_entry = f"{timestamp}|{number}|{name}|{message_preview[:50]}{'...' if len(message_preview) > 50 else ''}\n"
+        
+        with open(SENT_MESSAGES_LOG, 'a', encoding='utf-8') as f:
+            f.write(log_entry)
+        
+        logging.info(f"Saved {number} to sent messages log")
+    except Exception as e:
+        logging.error(f"Failed to save sent message log: {str(e)}")
+
+def is_message_already_sent(number, sent_contacts):
+    """Check if a message has already been sent to this contact"""
+    if not CHECK_DUPLICATES:
+        return False
+    
+    # Clean the number for comparison
+    clean_number = str(number).replace("+", "").replace(" ", "").replace("-", "").strip()
+    
+    # Check if this number exists in sent contacts
+    for sent_number in sent_contacts:
+        sent_clean = str(sent_number).replace("+", "").replace(" ", "").replace("-", "").strip()
+        if clean_number == sent_clean:
+            return True
+    
+    return False
+
+def show_duplicate_prevention_info(sent_contacts, total_contacts):
+    """Show information about duplicate prevention"""
+    if CHECK_DUPLICATES:
+        logging.info(f"🔄 Duplicate Prevention: ENABLED")
+        logging.info(f"📋 Previously sent: {len(sent_contacts)} contacts")
+        logging.info(f"📊 Total contacts: {total_contacts} contacts")
+        if sent_contacts:
+            logging.info(f"⏭️  Will skip {len(sent_contacts)} previously sent contacts")
+    else:
+        logging.info(f"🔄 Duplicate Prevention: DISABLED")
+        logging.info(f"⚠️  Messages may be sent multiple times to same contact")
+
+def balance_spreadsheet_data(data):
+    """Automatically balance spreadsheet data by duplicating/removing intro messages"""
+    logging.info("Balancing spreadsheet data...")
+    
+    # Get the intro message from the first row
+    if len(data) > 0:
+        first_intro = data.iloc[0]['IntroMessage'] if 'IntroMessage' in data.columns else ""
+        logging.info(f"Using intro message: {first_intro[:50]}{'...' if len(first_intro) > 50 else ''}")
+        
+        # Create a new dataframe with balanced data
+        balanced_data = []
+        
+        for idx, row in data.iterrows():
+            # Convert number to string and clean it properly
+            raw_number = row['Number']
+            if pd.isna(raw_number):
+                logging.warning(f"Skipping row {idx + 1}: NaN number")
+                continue
+                
+            # Convert to string and remove .0 if it's a float
+            number = str(raw_number).replace(".0", "").replace("+", "").replace(" ", "").strip()
+            name = row.get('Name', '') if 'Name' in data.columns else ''
+            
+            # Skip invalid numbers
+            if not number or number.lower() == 'nan':
+                logging.warning(f"Skipping row {idx + 1}: Invalid number")
+                continue
+            
+            # Create balanced row with same intro message
+            balanced_row = {
+                'Number': number,  # Use cleaned number
+                'IntroMessage': first_intro
+            }
+            
+            # Add Name column if it exists
+            if 'Name' in data.columns:
+                balanced_row['Name'] = name
+            
+            balanced_data.append(balanced_row)
+        
+        # Convert back to DataFrame
+        balanced_df = pd.DataFrame(balanced_data)
+        
+        logging.info(f"Data balanced: {len(balanced_df)} contacts with same intro message")
+        logging.info(f"Original data: {len(data)} rows")
+        logging.info(f"Balanced data: {len(balanced_df)} rows")
+        
+        return balanced_df
+    
+    return data
+
+def show_data_balance_info(original_data, balanced_data):
+    """Show information about data balancing"""
+    original_count = len(original_data)
+    balanced_count = len(balanced_data)
+    
+    logging.info("📊 DATA BALANCING SUMMARY:")
+    logging.info(f"  📋 Original rows: {original_count}")
+    logging.info(f"  ⚖️  Balanced rows: {balanced_count}")
+    
+    if balanced_count > original_count:
+        logging.info(f"  ➕ Added {balanced_count - original_count} rows")
+    elif balanced_count < original_count:
+        logging.info(f"  ➖ Removed {original_count - balanced_count} rows")
+    else:
+        logging.info(f"  ✅ No changes needed")
+    
+    # Show sample of balanced data
+    if len(balanced_data) > 0:
+        logging.info("  📝 Sample balanced data:")
+        for i, row in balanced_data.head(3).iterrows():
+            number = row.get('Number', 'N/A')
+            name = row.get('Name', 'N/A')
+            intro = row.get('IntroMessage', 'N/A')
+            logging.info(f"    Row {i+1}: Number='{number}', Name='{name}', Intro='{intro[:30]}{'...' if len(intro) > 30 else ''}'")
 
 # ====== MAIN EXECUTION ======
 def main():
@@ -400,6 +563,14 @@ def main():
         for i, row in data.head(3).iterrows():
             logging.info(f"  Row {i}: Number='{row.get('Number', 'N/A')}', Message='{row.get('IntroMessage', 'N/A')}'")
         
+        # Balance the data (duplicate/remove intro messages as needed)
+        original_data = data.copy()
+        if AUTO_BALANCE_DATA:
+            data = balance_spreadsheet_data(data)
+            show_data_balance_info(original_data, data)
+        else:
+            logging.info("Data balancing is disabled. Using original data.")
+        
     except Exception as e:
         logging.error(f"Failed to load data: {str(e)}")
         return
@@ -417,13 +588,35 @@ def main():
         success_count = 0
         failed_contacts = []
         processed_count = 0
+        skipped_duplicates = 0
         
         logging.info(f"Starting to process {len(data)} contacts...")
+        logging.info(f"Batch processing: {BATCH_SIZE} contacts per batch, {BATCH_DELAY} seconds between batches")
+        
+        # Calculate total batches
+        total_batches = (len(data) + BATCH_SIZE - 1) // BATCH_SIZE
+        current_batch = 1
+        contacts_in_current_batch = 0
+        
+        sent_contacts = load_sent_messages()
+        show_duplicate_prevention_info(sent_contacts, len(data))
         
         for idx, row in data.iterrows():
-            number = str(row['Number']).replace("+", "").replace(" ", "").strip()
-            name = row.get('Name', '') if 'Name' in row else ''
+            # Convert number to string and clean it properly
+            raw_number = row['Number']
+            if pd.isna(raw_number):
+                logging.warning(f"Skipping contact {idx + 1}: NaN number")
+                failed_contacts.append({"number": "NaN", "reason": "NaN number"})
+                continue
+                
+            # Convert to string and remove .0 if it's a float
+            number = str(raw_number).replace(".0", "").replace("+", "").replace(" ", "").strip()
+            name = row.get('Name', '') if 'Name' in data.columns else ''
             intro_msg = str(row['IntroMessage']).strip()
+            
+            # Show batch progress at the start of each batch
+            if processed_count % BATCH_SIZE == 0:
+                show_batch_progress(current_batch, total_batches, contacts_in_current_batch, processed_count)
             
             logging.info(f"=== Processing contact {idx + 1}/{len(data)}: {number} ===")
             
@@ -431,6 +624,12 @@ def main():
             if not number or number.lower() == 'nan':
                 logging.warning(f"Skipping contact {idx + 1}: Invalid number")
                 failed_contacts.append({"number": number, "reason": "Invalid number"})
+                continue
+            
+            # Check if message already sent
+            if is_message_already_sent(number, sent_contacts):
+                logging.info(f"⏭️  SKIPPING {number} - already received intro message")
+                skipped_duplicates += 1
                 continue
             
             if not search_and_open_chat(driver, number, name):
@@ -443,10 +642,14 @@ def main():
             intro_success = True
             if intro_msg and intro_msg.lower() != 'nan':
                 if send_message(driver, intro_msg):
-                    logging.info(f"Intro message sent to {number}")
+                    logging.info(f"✅ Intro message sent to {number}")
                     time.sleep(1)  # Small delay to ensure message is processed
+                    # Save to sent messages log
+                    save_sent_message(number, name, intro_msg)
+                    # Add to sent contacts set for current session
+                    sent_contacts.add(number)
                 else:
-                    logging.error(f"Failed to send intro message to {number}")
+                    logging.error(f"❌ Failed to send intro message to {number}")
                     failed_contacts.append({"number": number, "reason": "Failed to send intro message"})
                     intro_success = False
             else:
@@ -459,7 +662,23 @@ def main():
                 logging.warning(f"PARTIAL FAILURE: Contact {number} had issues")
             
             processed_count += 1
+            contacts_in_current_batch += 1
             logging.info(f"Progress: {processed_count}/{len(data)} contacts processed")
+            
+            # Check if we need to take a batch break
+            if processed_count % BATCH_SIZE == 0 and idx < len(data) - 1:
+                logging.info(f"🎯 BATCH {current_batch} COMPLETED: {processed_count} contacts processed")
+                logging.info(f"✅ Successfully processed: {success_count} contacts")
+                logging.info(f"⏭️  Skipped duplicates: {skipped_duplicates} contacts")
+                logging.info(f"❌ Failed: {len(failed_contacts)} contacts")
+                
+                # Take batch break
+                batch_delay()
+                
+                # Prepare for next batch
+                current_batch += 1
+                contacts_in_current_batch = 0
+                logging.info(f"🚀 STARTING BATCH {current_batch}")
             
             logging.info(f"DEBUG: processed_count={processed_count}, CONTACT_LIMIT={CONTACT_LIMIT}")
             if processed_count >= CONTACT_LIMIT:
@@ -472,8 +691,9 @@ def main():
                 logging.info("All contacts processed!")
         
         logging.info("Campaign completed!")
-        logging.info(f"Successfully sent to {success_count} contacts")
-        logging.info(f"Failed to send to {len(failed_contacts)} contacts")
+        logging.info(f"✅ Successfully sent to {success_count} contacts")
+        logging.info(f"⏭️  Skipped duplicates: {skipped_duplicates} contacts")
+        logging.info(f"❌ Failed to send to {len(failed_contacts)} contacts")
         
         if failed_contacts:
             logging.info("Failed contacts:")
