@@ -4,6 +4,7 @@ import time
 import random
 import logging
 from datetime import datetime
+import threading
 import pandas as pd
 import pyperclip
 try:
@@ -47,17 +48,37 @@ logging.basicConfig(
 GOOGLE_SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vRW84c1YtBx33dt8e5i57wgvgc3JKSgXiSgNYGf5L5huBCfkcEo6pTI2NSevcUwue1zdeV5mqgiQQtN/pub?gid=0&single=true&output=csv"
 USE_BETA_UI = True  # Prioritize WhatsApp Web Beta UI selectors
 # Speed controls (override via env)
-DELAY_BETWEEN_CONTACTS = (
-    int(os.environ.get('DELAY_MIN', '2')),
-    int(os.environ.get('DELAY_MAX', '5')),
-)
-BATCH_SIZE = 5  # Number of contacts to process before taking a break
-BATCH_DELAY = 20  # Seconds to wait between batches
+# You can disable automatic delays by setting NO_DELAY=1 in the environment.
+# You can also set a fixed delay with DELAY_SECONDS or use DELAY_MIN / DELAY_MAX.
+NO_DELAY = os.environ.get('NO_DELAY', '0') == '1'
+FAST_MODE = os.environ.get('FAST_MODE', '0') == '1'  # If true, trim internal fixed sleeps
+SLEEP_SCALE = float(os.environ.get('SLEEP_SCALE', '1.0'))  # Multiply all controlled sleeps
+if NO_DELAY and not FAST_MODE:
+    # Auto-enable FAST_MODE when NO_DELAY requested
+    FAST_MODE = True
+if 'DELAY_SECONDS' in os.environ:
+    try:
+        d = int(os.environ.get('DELAY_SECONDS', '0'))
+        DELAY_BETWEEN_CONTACTS = (d, d)
+    except Exception:
+        DELAY_BETWEEN_CONTACTS = (
+            int(os.environ.get('DELAY_MIN', '0')),
+            int(os.environ.get('DELAY_MAX', '0')),
+        )
+else:
+    # Default now zero delay unless user explicitly sets env vars
+    DELAY_BETWEEN_CONTACTS = (
+        int(os.environ.get('DELAY_MIN', '0')),
+        int(os.environ.get('DELAY_MAX', '0')),
+    )
+BATCH_SIZE = 5  # Number of contacts to process before taking a break (reset from 40)
+BATCH_DELAY = 5  # Seconds to wait between batches (reduced from 10)
 PERSISTENT_PROFILE_DIR = r"./chrome_profile"
 MAX_RETRIES = int(os.environ.get('MAX_RETRIES', '2'))
 CHAT_LOAD_TIMEOUT = int(os.environ.get('CHAT_LOAD_TIMEOUT', '20'))
-MESSAGE_SEND_TIMEOUT = int(os.environ.get('MESSAGE_SEND_TIMEOUT', '2'))
+MESSAGE_SEND_TIMEOUT = int(os.environ.get('MESSAGE_SEND_TIMEOUT', '1'))
 WHATSAPP_LOAD_TIMEOUT = int(os.environ.get('WHATSAPP_LOAD_TIMEOUT', '45'))
+SYNC_DURATION = int(os.environ.get('SYNC_DURATION', '0'))  # Seconds to keep sync-only session alive (0 = infinite until CTRL+C)
 
 # Duplicate prevention
 SENT_MESSAGES_LOG = f"sent_messages_{datetime.now().strftime('%Y%m%d')}.log"
@@ -65,6 +86,9 @@ CHECK_DUPLICATES = True  # Set to False to disable duplicate checking
 
 # Data balancing
 AUTO_BALANCE_DATA = True  # Set to False to disable automatic data balancing
+ 
+# ====== MANUAL DATA OVERRIDE (set via GUI) ======
+MANUAL_DATA = None  # If set (DataFrame), run_campaign will use this instead of loading sheet
 
 # More robust CONTACT_LIMIT handling
 try:
@@ -82,10 +106,53 @@ except (ValueError, TypeError) as e:
 DISABLE_IMAGES = os.environ.get('DISABLE_IMAGES', '1') == '1'
 
 # Debug: Show actual values
-logging.info(f"Configuration loaded:")
-logging.info(f"  CONTACT_LIMIT: {CONTACT_LIMIT}")
-logging.info(f"  DELAY_BETWEEN_CONTACTS: {DELAY_BETWEEN_CONTACTS}")
-logging.info(f"  MAX_RETRIES: {MAX_RETRIES}")
+logging.info("Configuration loaded:")
+logging.info("  CONTACT_LIMIT: %s", CONTACT_LIMIT)
+logging.info("  DELAY_BETWEEN_CONTACTS: %s", DELAY_BETWEEN_CONTACTS)
+logging.info("  NO_DELAY: %s", NO_DELAY)
+logging.info("  FAST_MODE: %s", FAST_MODE)
+logging.info("  SLEEP_SCALE: %s", SLEEP_SCALE)
+
+# ====== CONTROL EVENTS FOR PAUSE/RESUME/STOP ======
+PAUSE_EVENT = threading.Event()
+PAUSE_EVENT.set()  # Start unpaused
+STOP_EVENT = threading.Event()
+CURRENT_DRIVER = None
+
+def pause_sending():
+    PAUSE_EVENT.clear()
+    logging.info("PAUSED: Message sending paused")
+
+def resume_sending():
+    if not PAUSE_EVENT.is_set():
+        PAUSE_EVENT.set()
+        logging.info("RESUMED: Message sending resumed")
+
+def stop_sending():
+    STOP_EVENT.set()
+    PAUSE_EVENT.set()
+    logging.info("STOP REQUESTED: Will stop after current contact")
+logging.info("  MAX_RETRIES: %s", MAX_RETRIES)
+
+def set_manual_data(numbers, message):
+    """Provide a list of phone numbers (strings) and a single message to send.
+    Called by GUI to override spreadsheet loading.
+    """
+    global MANUAL_DATA
+    rows = []
+    for raw in numbers:
+        if not raw:
+            continue
+        cleaned = str(raw).replace('+', '').replace(' ', '').strip()
+        if not cleaned or cleaned.lower() == 'nan':
+            continue
+        rows.append({'Number': cleaned, 'IntroMessage': message})
+    if rows:
+        MANUAL_DATA = pd.DataFrame(rows)
+        logging.info(f"Manual numbers loaded: {len(MANUAL_DATA)} contacts (spreadsheet will be skipped)")
+    else:
+        MANUAL_DATA = None
+        logging.warning("Manual numbers list empty after cleaning; falling back to spreadsheet data")
 
 # ====== ENHANCED SELENIUM SETUP ======
 def setup_driver():
@@ -125,6 +192,29 @@ def setup_driver():
     driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
     driver.set_window_size(1366, 768)
     return driver
+
+# ====== SLEEP HELPERS ======
+def controlled_sleep(seconds: float, reason: str = ""):
+    """Sleep utility that can be shortened or skipped when FAST_MODE is enabled.
+    Large sleeps (>0.6s) become 0s in FAST_MODE; small micro waits become 0.05s.
+    A SLEEP_SCALE factor can globally scale durations (ignored when FAST_MODE trims)."""
+    if seconds <= 0:
+        return
+    original = seconds
+    if FAST_MODE:
+        if seconds > 0.6:
+            seconds = 0  # skip long waits entirely
+        else:
+            seconds = 0.05  # keep a tiny buffer for stability
+    else:
+        seconds = seconds * SLEEP_SCALE
+    if seconds > 0:
+        if reason:
+            logging.debug(f"Sleep {seconds:.2f}s (orig {original:.2f}s) - {reason}")
+        time.sleep(seconds)
+    else:
+        if reason:
+            logging.debug(f"Skipped sleep (orig {original:.2f}s) - {reason}")
 
 def wait_for_whatsapp_load(driver, timeout=WHATSAPP_LOAD_TIMEOUT):
     """Wait for WhatsApp Web to fully load with better detection"""
@@ -201,9 +291,8 @@ def search_and_open_chat(driver, number, name=None):
         direct_url = f"https://web.whatsapp.com/send?phone={number}"
         logging.info(f"Trying direct URL: {direct_url}")
         driver.get(direct_url)
-        time.sleep(2)  # Increased from 0.1 to 2 seconds
-        
-        # Multiple chat indicators for better reliability
+        controlled_sleep(2, "post driver.get direct chat load")
+
         chat_indicators = [
             "//div[@contenteditable='true'][@data-tab='10']",
             "//div[@contenteditable='true'][@data-tab='6']",
@@ -214,7 +303,7 @@ def search_and_open_chat(driver, number, name=None):
             "//*[@data-testid='conversation-compose-box-input']",
             "//*[@data-testid='compose-box-input']"
         ]
-        
+
         chat_loaded = False
         for i, indicator in enumerate(chat_indicators, 1):
             try:
@@ -226,16 +315,16 @@ def search_and_open_chat(driver, number, name=None):
             except TimeoutException:
                 logging.info(f"Indicator {i} not found, trying next...")
                 continue
-        
+
         if chat_loaded:
-            time.sleep(1)  # Increased from 0.1 to 1 second
+            controlled_sleep(1, "after chat indicators detected")
             page_text = driver.execute_script("return document.body.innerText.toLowerCase()")
             if "invalid number" in page_text or "phone number shared" in page_text:
                 logging.error(f"Invalid number detected for {number}")
                 return False
             logging.info(f"SUCCESS: Chat opened for {number}")
             return True
-        
+
         logging.info(f"Direct URL failed for {number}, trying search method...")
         return search_contact_via_search_box(driver, number, name)
     except Exception as e:
@@ -247,20 +336,19 @@ def search_contact_via_search_box(driver, number, name=None):
     try:
         logging.info(f"Searching via search box for {number}")
         driver.get("https://web.whatsapp.com")
-        time.sleep(3)
-        
-        # Multiple search box selectors for better reliability
+        controlled_sleep(3, "post driver.get main page for search")
+
         search_selectors = [
-            "//div[@contenteditable='true'][@data-tab='3']", 
-            "//div[contains(@class, 'selectable-text')][@contenteditable='true'][@data-tab='3']", 
-            "//input[@type='text'][@placeholder='Search or start new chat']", 
+            "//div[@contenteditable='true'][@data-tab='3']",
+            "//div[contains(@class, 'selectable-text')][@contenteditable='true'][@data-tab='3']",
+            "//input[@type='text'][@placeholder='Search or start new chat']",
             "//div[@title='Search or start new chat']",
             "//div[@contenteditable='true'][@data-tab='6']",
             "//div[@contenteditable='true'][@data-tab='1']",
             "//*[@data-testid='chat-list-search']",
             "//div[contains(@class, 'search')]//div[@contenteditable='true']"
         ]
-        
+
         search_box = None
         for search_selector in search_selectors:
             try:
@@ -269,43 +357,41 @@ def search_contact_via_search_box(driver, number, name=None):
                 break
             except TimeoutException:
                 continue
-        
+
         if not search_box:
             logging.error("Could not find search box")
             return False
-        
+
         search_terms = []
         if name and name.strip() and name.lower() != 'nan':
             search_terms.append(name.strip())
         search_terms.append(number)
-        
+
         for search_term in search_terms:
             logging.info(f"Searching for: {search_term}")
             try:
                 search_box.click()
-                time.sleep(0.5)
+                controlled_sleep(0.5, "focus search box")
                 search_box.clear()
                 search_box.send_keys(str(search_term))
-                time.sleep(3)
-                
-                # Multiple result selectors for better reliability
+                controlled_sleep(3, "wait for search results populate")
+
                 result_selectors = [
-                    "//div[@id='pane-side']//div[contains(@class, 'zoWT4')]//span", 
-                    "//div[contains(@class, 'chat-list')]//div[contains(@class, 'chat')]", 
+                    "//div[@id='pane-side']//div[contains(@class, 'zoWT4')]//span",
+                    "//div[contains(@class, 'chat-list')]//div[contains(@class, 'chat')]",
                     "//div[@role='listitem']//div[contains(@class, 'contact')]",
                     "//div[contains(@class, 'chat')]//div[contains(@class, 'contact')]",
                     "//div[@role='listitem']//div[contains(@class, 'chat')]",
                     "//div[contains(@class, '_199zF')]",
                     "//div[contains(@class, 'zoWT4')]"
                 ]
-                
+
                 for result_selector in result_selectors:
                     try:
                         contact_result = WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, result_selector)))
                         contact_result.click()
-                        time.sleep(3)
-                        
-                        # Check if chat is actually opened
+                        controlled_sleep(3, "after clicking search result to load chat")
+
                         chat_indicators = [
                             "//div[@contenteditable='true'][@data-tab='10']",
                             "//div[@contenteditable='true'][@data-tab='6']",
@@ -314,24 +400,21 @@ def search_contact_via_search_box(driver, number, name=None):
                             "//*[@data-testid='conversation-compose-box-input']",
                             "//*[@data-testid='compose-box-input']"
                         ]
-                        
+
                         for chat_indicator in chat_indicators:
                             if driver.find_elements(By.XPATH, chat_indicator):
                                 logging.info(f"SUCCESS: Chat opened via search for {search_term}")
                                 return True
-                        
+
                         logging.info(f"Chat indicator not found after clicking result for {search_term}")
-                        
                     except TimeoutException:
                         continue
-                        
             except Exception as e:
                 logging.warning(f"Error during search for {search_term}: {str(e)}")
                 continue
-                
+
         logging.error(f"Search method failed for {number}")
         return False
-        
     except Exception as e:
         logging.error(f"ERROR: Search method failed for {number} - {str(e)}")
         return False
@@ -340,7 +423,14 @@ def send_message(driver, message, retry_count=0):
     """Send text message with retry logic"""
     try:
         logging.info("Sending message...")
-        message_selectors = ["//*[@data-testid='conversation-compose-box-input']" if USE_BETA_UI else None, "//*[@data-testid='compose-box-input']" if USE_BETA_UI else None, "//div[@contenteditable='true'][@data-tab='10']", "//div[@contenteditable='true'][contains(@class, 'selectable-text')]", "//div[@role='textbox'][@contenteditable='true']", "//div[contains(@class, '_13NKt')][@contenteditable='true']"]
+        message_selectors = [
+            "//*[@data-testid='conversation-compose-box-input']" if USE_BETA_UI else None,
+            "//*[@data-testid='compose-box-input']" if USE_BETA_UI else None,
+            "//div[@contenteditable='true'][@data-tab='10']",
+            "//div[@contenteditable='true'][contains(@class, 'selectable-text')]",
+            "//div[@role='textbox'][@contenteditable='true']",
+            "//div[contains(@class, '_13NKt')][@contenteditable='true']"
+        ]
         message_selectors = [ms for ms in message_selectors if ms]
         primary_selector = message_selectors[0]
         message_box = None
@@ -356,7 +446,7 @@ def send_message(driver, message, retry_count=0):
         if not message_box:
             raise Exception("Could not find message input box")
         message_box.click()
-        time.sleep(0.3)
+        controlled_sleep(0.3, "after focusing message box")
         message_box.send_keys(Keys.CONTROL, 'a')
         message_box.send_keys(Keys.DELETE)
         try:
@@ -371,15 +461,15 @@ def send_message(driver, message, retry_count=0):
                     if line_i < len(lines) - 1:
                         message_box.send_keys(Keys.SHIFT, Keys.ENTER)
                 if idx < len(chunks) - 1:
-                    time.sleep(0.3)
+                    controlled_sleep(0.3, "between chunk pastes")
         message_box.send_keys(Keys.ENTER)
-        time.sleep(0.3)
+        controlled_sleep(0.3, "post ENTER send stabilization")
         logging.info("SUCCESS: Message sent")
         return True
     except Exception as e:
         if retry_count < MAX_RETRIES:
             logging.warning(f"Message send failed, retrying... ({retry_count + 1}/{MAX_RETRIES})")
-            time.sleep(3)
+            controlled_sleep(3, "retry backoff after failed send")
             return send_message(driver, message, retry_count + 1)
         else:
             logging.error(f"FAILED: Could not send message after {MAX_RETRIES} attempts - {str(e)}")
@@ -393,9 +483,21 @@ def show_batch_progress(current_batch, total_batches, contacts_in_current_batch,
 
 def random_delay():
     """Generate random delay between contacts to appear more human-like"""
-    delay = random.randint(DELAY_BETWEEN_CONTACTS[0], DELAY_BETWEEN_CONTACTS[1])
-    logging.info(f"Waiting {delay} seconds before next contact...")
-    time.sleep(delay)
+    if NO_DELAY:
+        logging.info("NO_DELAY enabled: skipping delay between messages")
+        return
+
+    low, high = DELAY_BETWEEN_CONTACTS
+    # If both bounds are zero, skip sleeping
+    if low == 0 and high == 0:
+        return
+
+    delay = random.randint(low, high) if high >= low else low
+    if delay > 0:
+        logging.info(f"Waiting {delay} seconds before next contact...")
+        time.sleep(delay)
+    else:
+        logging.debug("Calculated delay is 0, continuing immediately")
 
 def batch_delay():
     """Wait between batches"""
@@ -546,43 +648,75 @@ def show_data_balance_info(original_data, balanced_data):
             logging.info(f"    Row {i+1}: Number='{number}', Name='{name}', Intro='{intro[:30]}{'...' if len(intro) > 30 else ''}'")
 
 # ====== MAIN EXECUTION ======
-def main():
+def run_campaign():
     logging.info("Starting WhatsApp Bulk Sender...")
-    try:
-        logging.info("Fetching Google Sheet data...")
-        data = pd.read_csv(GOOGLE_SHEET_CSV_URL)
-        required_cols = ['Number', 'IntroMessage']
-        present_cols = [c for c in required_cols if c in data.columns]
-        data = data.dropna(subset=present_cols)
-        logging.info(f"Loaded {len(data)} contacts from spreadsheet")
-        
-        # Debug: Show data info
-        logging.info(f"Data shape: {data.shape}")
-        logging.info(f"Data columns: {list(data.columns)}")
-        logging.info(f"First few rows:")
-        for i, row in data.head(3).iterrows():
-            logging.info(f"  Row {i}: Number='{row.get('Number', 'N/A')}', Message='{row.get('IntroMessage', 'N/A')}'")
-        
-        # Balance the data (duplicate/remove intro messages as needed)
-        original_data = data.copy()
-        if AUTO_BALANCE_DATA:
-            data = balance_spreadsheet_data(data)
-            show_data_balance_info(original_data, data)
+    sync_only = ('--sync-only' in sys.argv) or (os.environ.get('SYNC_ONLY', '0') == '1')
+    if sync_only:
+        logging.info("SYNC-ONLY MODE: Will open WhatsApp Web without sending messages.")
+        logging.info("Set SYNC_DURATION env var to a number of seconds to auto-exit, or leave 0 for manual CTRL+C.")
+    # Skip data loading entirely if in sync-only mode
+    if not sync_only:
+        if MANUAL_DATA is not None:
+            data = MANUAL_DATA.copy()
+            logging.info(f"Using MANUAL DATA: {len(data)} contacts provided via GUI")
         else:
-            logging.info("Data balancing is disabled. Using original data.")
-        
-    except Exception as e:
-        logging.error(f"Failed to load data: {str(e)}")
-        return
+            try:
+                logging.info("Fetching Google Sheet data...")
+                data = pd.read_csv(GOOGLE_SHEET_CSV_URL)
+                required_cols = ['Number', 'IntroMessage']
+                present_cols = [c for c in required_cols if c in data.columns]
+                data = data.dropna(subset=present_cols)
+                logging.info(f"Loaded {len(data)} contacts from spreadsheet")
+                
+                # Debug: Show data info
+                logging.info(f"Data shape: {data.shape}")
+                logging.info(f"Data columns: {list(data.columns)}")
+                logging.info(f"First few rows:")
+                for i, row in data.head(3).iterrows():
+                    logging.info(f"  Row {i}: Number='{row.get('Number', 'N/A')}', Message='{row.get('IntroMessage', 'N/A')}'")
+                
+                # Balance the data (duplicate/remove intro messages as needed)
+                original_data = data.copy()
+                if AUTO_BALANCE_DATA:
+                    data = balance_spreadsheet_data(data)
+                    show_data_balance_info(original_data, data)
+                else:
+                    logging.info("Data balancing is disabled. Using original data.")
+                
+            except Exception as e:
+                logging.error(f"Failed to load data: {str(e)}")
+                return
     
     logging.info("Setting up Chrome driver...")
     driver = setup_driver()
+    global CURRENT_DRIVER
+    CURRENT_DRIVER = driver
     
     try:
         logging.info("Loading WhatsApp Web...")
         driver.get("https://web.whatsapp.com")
         if not wait_for_whatsapp_load(driver):
             logging.error("Failed to load WhatsApp Web. Please check your internet connection and try again.")
+            return
+
+        if sync_only:
+            logging.info("SYNC-ONLY MODE: WhatsApp loaded. Chats will sync using your persistent profile.")
+            if SYNC_DURATION > 0:
+                logging.info(f"Will keep browser open for {SYNC_DURATION} seconds then exit (browser stays open until manually closed).")
+                try:
+                    end_time = time.time() + SYNC_DURATION
+                    while time.time() < end_time:
+                        time.sleep(1)
+                except KeyboardInterrupt:
+                    logging.info("Sync-only session interrupted by user.")
+            else:
+                logging.info("Press CTRL+C to end sync-only session (browser will remain open).")
+                try:
+                    while True:
+                        time.sleep(60)
+                except KeyboardInterrupt:
+                    logging.info("Sync-only session ended by user.")
+            logging.info("Exiting sync-only mode without sending messages.")
             return
         
         success_count = 0
@@ -602,6 +736,11 @@ def main():
         show_duplicate_prevention_info(sent_contacts, len(data))
         
         for idx, row in data.iterrows():
+            if STOP_EVENT.is_set():
+                logging.info("Stop flag detected. Exiting loop.")
+                break
+            while not PAUSE_EVENT.is_set():
+                time.sleep(0.2)
             # Convert number to string and clean it properly
             raw_number = row['Number']
             if pd.isna(raw_number):
@@ -637,13 +776,13 @@ def main():
                 failed_contacts.append({"number": number, "reason": "Could not open chat"})
                 continue
             
-            time.sleep(2)
+            controlled_sleep(2, "post chat open before sending intro")
             
             intro_success = True
             if intro_msg and intro_msg.lower() != 'nan':
                 if send_message(driver, intro_msg):
                     logging.info(f"✅ Intro message sent to {number}")
-                    time.sleep(1)  # Small delay to ensure message is processed
+                    controlled_sleep(1, "post send assurance")
                     # Save to sent messages log
                     save_sent_message(number, name, intro_msg)
                     # Add to sent contacts set for current session
@@ -685,7 +824,7 @@ def main():
                 logging.info(f"Reached contact limit of {CONTACT_LIMIT}, stopping...")
                 break
                 
-            if idx < len(data) - 1:
+            if idx < len(data) - 1 and not STOP_EVENT.is_set():
                 random_delay()
             else:
                 logging.info("All contacts processed!")
@@ -712,6 +851,9 @@ def main():
         #     driver.quit()
         # except:
         #     pass
+
+def main():
+    run_campaign()
 
 if __name__ == "__main__":
     main()
