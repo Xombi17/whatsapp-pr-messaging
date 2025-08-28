@@ -54,6 +54,7 @@ class WhatsAppGUI:
             btns = ttk.Frame(container)
             btns.pack(fill=tk.X, pady=(6,4))
             ttk.Button(btns, text="Start", command=self.start).pack(side=tk.LEFT, padx=4)
+            ttk.Button(btns, text="Check Only", command=self.check_only).pack(side=tk.LEFT, padx=4)
             ttk.Button(btns, text="Pause", command=self.pause).pack(side=tk.LEFT, padx=4)
             ttk.Button(btns, text="Resume", command=self.resume).pack(side=tk.LEFT, padx=4)
             ttk.Button(btns, text="Stop", command=self.stop).pack(side=tk.LEFT, padx=4)
@@ -140,6 +141,27 @@ class WhatsAppGUI:
             except Exception:
                 pass
             self.root.after(300, self.root.destroy)
+
+        def check_only(self):
+            if self.worker_thread and self.worker_thread.is_alive():
+                messagebox.showinfo("Running", "Another task is running")
+                return
+            numbers = [n.strip() for n in self.numbers_text.get('1.0', tk.END).strip().splitlines() if n.strip()]
+            if not numbers:
+                messagebox.showerror("No Numbers", "Enter numbers to check")
+                return
+            self.status_var.set("Checking")
+            self.worker_thread = threading.Thread(target=self._run_check, daemon=True)
+            self.worker_thread.start()
+            self._append_log("Started check-only run")
+
+        def _run_check(self):
+            try:
+                numbers = [n.strip() for n in self.numbers_text.get('1.0', tk.END).strip().splitlines() if n.strip()]
+                wb.open_chats_check_only(numbers)
+                self.status_var.set("Check Complete")
+            except Exception as e:
+                self.status_var.set(f"Error: {e}")
 
 
 def main():

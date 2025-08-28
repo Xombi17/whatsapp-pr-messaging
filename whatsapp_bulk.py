@@ -7,6 +7,10 @@ from datetime import datetime
 import threading
 import pandas as pd
 import pyperclip
+
+# Create logs directory if it doesn't exist
+LOGS_DIR = os.path.join(os.path.dirname(__file__), 'logs')
+os.makedirs(LOGS_DIR, exist_ok=True)
 try:
     import pyautogui
 except Exception:
@@ -39,7 +43,7 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler(f'whatsapp_sender_{datetime.now().strftime("%Y%m%d_%H%M%S")}.log', encoding='utf-8'),
+        logging.FileHandler(os.path.join(LOGS_DIR, f'whatsapp_sender_{datetime.now().strftime("%Y%m%d_%H%M%S")}.log'), encoding='utf-8'),
         logging.StreamHandler()
     ]
 )
@@ -81,7 +85,7 @@ WHATSAPP_LOAD_TIMEOUT = int(os.environ.get('WHATSAPP_LOAD_TIMEOUT', '45'))
 SYNC_DURATION = int(os.environ.get('SYNC_DURATION', '0'))  # Seconds to keep sync-only session alive (0 = infinite until CTRL+C)
 
 # Duplicate prevention
-SENT_MESSAGES_LOG = f"sent_messages_{datetime.now().strftime('%Y%m%d')}.log"
+SENT_MESSAGES_LOG = os.path.join(LOGS_DIR, f"sent_messages_{datetime.now().strftime('%Y%m%d')}.log")
 CHECK_DUPLICATES = True  # Set to False to disable duplicate checking
 
 # Data balancing
@@ -558,6 +562,46 @@ def is_message_already_sent(number, sent_contacts):
             return True
     
     return False
+
+def open_chats_check_only(numbers):
+    """Open each provided number's chat (no messages sent) and log whether an intro was previously sent.
+    numbers: iterable of raw number strings.
+    """
+    logging.info("CHECK-ONLY MODE: Opening chats to inspect prior send status (no messages will be sent)")
+    driver = setup_driver()
+    global CURRENT_DRIVER
+    CURRENT_DRIVER = driver
+    try:
+        logging.info("Loading WhatsApp Web...")
+        driver.get("https://web.whatsapp.com")
+        if not wait_for_whatsapp_load(driver):
+            logging.error("Failed to load WhatsApp Web.")
+            return
+        sent_contacts = load_sent_messages()
+        processed = 0
+        already = 0
+        fresh = 0
+        for raw in numbers:
+            if STOP_EVENT.is_set():
+                break
+            number = str(raw).replace('+','').replace(' ','').replace('-','').strip()
+            if not number:
+                continue
+            status = 'UNKNOWN'
+            previously = is_message_already_sent(number, sent_contacts)
+            status = 'SENT_BEFORE' if previously else 'NOT_SENT'
+            if search_and_open_chat(driver, number):
+                logging.info(f"[CHECK] {number}: {status}")
+            else:
+                logging.info(f"[CHECK] {number}: CHAT_OPEN_FAILED")
+            processed += 1
+            already += 1 if previously else 0
+            fresh += 0 if previously else 1
+            if DELAY_BETWEEN_CONTACTS[0] or DELAY_BETWEEN_CONTACTS[1]:
+                controlled_sleep( (DELAY_BETWEEN_CONTACTS[0]+DELAY_BETWEEN_CONTACTS[1])/2.0 ,"between checks")
+        logging.info(f"CHECK SUMMARY: Total={processed} PreviouslySent={already} NotSent={fresh}")
+    finally:
+        logging.info("Check-only session complete. Browser left open for manual review.")
 
 def show_duplicate_prevention_info(sent_contacts, total_contacts):
     """Show information about duplicate prevention"""
