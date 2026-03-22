@@ -100,7 +100,9 @@ client.on('ready', async () => {
             await delay(waitTime);
         }
 
-        console.log('\n🎉 All messages sent! You can exit with Ctrl+C.');
+        console.log('\n🎉 All messages sent! Exiting...');
+        await client.destroy();
+        process.exit(0);
 
     } catch (error) {
         console.error('Error during execution:', error);
