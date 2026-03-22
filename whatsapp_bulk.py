@@ -30,7 +30,7 @@ from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import TimeoutException, WebDriverException
+from selenium.common.exceptions import TimeoutException, WebDriverException, SessionNotCreatedException
 
 # Fix Windows console encoding issues
 if sys.platform.startswith('win'):
@@ -49,7 +49,7 @@ logging.basicConfig(
 )
 
 # ====== CONFIG ======
-GOOGLE_SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vRW84c1YtBx33dt8e5i57wgvgc3JKSgXiSgNYGf5L5huBCfkcEo6pTI2NSevcUwue1zdeV5mqgiQQtN/pub?gid=0&single=true&output=csv"
+GOOGLE_SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vTr0sbMLaDyfWEXov59O3EPWaELMUEojipzcCeeJ3zbKMt2Avto46_4uXPxv90SZA/pub?gid=856437775&single=true&output=csv"
 USE_BETA_UI = True  # Prioritize WhatsApp Web Beta UI selectors
 # Speed controls (override via env)
 # You can disable automatic delays by setting NO_DELAY=1 in the environment.
@@ -77,7 +77,10 @@ else:
     )
 BATCH_SIZE = 5  # Number of contacts to process before taking a break (reset from 40)
 BATCH_DELAY = 5  # Seconds to wait between batches (reduced from 10)
-PERSISTENT_PROFILE_DIR = r"./chrome_profile"
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+PERSISTENT_PROFILE_DIR = os.path.join(BASE_DIR, "chrome_profile")
+CHROME_PROFILE_NAME = os.environ.get('CHROME_PROFILE_NAME', 'Default')
+KEEP_BROWSER_OPEN = os.environ.get('KEEP_BROWSER_OPEN', '0') == '1'
 MAX_RETRIES = int(os.environ.get('MAX_RETRIES', '2'))
 CHAT_LOAD_TIMEOUT = int(os.environ.get('CHAT_LOAD_TIMEOUT', '20'))
 MESSAGE_SEND_TIMEOUT = int(os.environ.get('MESSAGE_SEND_TIMEOUT', '1'))
@@ -116,6 +119,9 @@ logging.info("  DELAY_BETWEEN_CONTACTS: %s", DELAY_BETWEEN_CONTACTS)
 logging.info("  NO_DELAY: %s", NO_DELAY)
 logging.info("  FAST_MODE: %s", FAST_MODE)
 logging.info("  SLEEP_SCALE: %s", SLEEP_SCALE)
+logging.info("  PERSISTENT_PROFILE_DIR: %s", PERSISTENT_PROFILE_DIR)
+logging.info("  CHROME_PROFILE_NAME: %s", CHROME_PROFILE_NAME)
+logging.info("  KEEP_BROWSER_OPEN: %s", KEEP_BROWSER_OPEN)
 
 # ====== CONTROL EVENTS FOR PAUSE/RESUME/STOP ======
 PAUSE_EVENT = threading.Event()
@@ -162,7 +168,9 @@ def set_manual_data(numbers, message):
 def setup_driver():
     """Setup Chrome driver with optimized settings for WhatsApp Web"""
     options = Options()
-    options.add_argument(f"user-data-dir={os.path.abspath(PERSISTENT_PROFILE_DIR)}")
+    os.makedirs(PERSISTENT_PROFILE_DIR, exist_ok=True)
+    options.add_argument(f"user-data-dir={PERSISTENT_PROFILE_DIR}")
+    options.add_argument(f"--profile-directory={CHROME_PROFILE_NAME}")
     try:
         options.page_load_strategy = 'eager'
     except Exception:
@@ -192,7 +200,24 @@ def setup_driver():
             {"profile.managed_default_content_settings.images": 2},
         )
     options.add_argument("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-    driver = webdriver.Chrome(options=options)
+    def _clear_profile_locks():
+        for lock_name in ("SingletonLock", "SingletonCookie", "SingletonSocket"):
+            lock_path = os.path.join(PERSISTENT_PROFILE_DIR, lock_name)
+            if os.path.exists(lock_path):
+                try:
+                    os.remove(lock_path)
+                    logging.warning(f"Removed stale Chrome profile lock: {lock_path}")
+                except Exception as lock_error:
+                    logging.warning(f"Could not remove lock file {lock_path}: {lock_error}")
+
+    _clear_profile_locks()
+    try:
+        driver = webdriver.Chrome(options=options)
+    except (WebDriverException, SessionNotCreatedException) as first_error:
+        logging.warning(f"Chrome startup failed on first attempt: {first_error}")
+        _clear_profile_locks()
+        controlled_sleep(1, "retry chrome startup after lock cleanup")
+        driver = webdriver.Chrome(options=options)
     driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
     driver.set_window_size(1366, 768)
     return driver
@@ -427,6 +452,7 @@ def send_message(driver, message, retry_count=0):
     """Send text message with retry logic"""
     try:
         logging.info("Sending message...")
+        original_message = str(message)
         message_selectors = [
             "//*[@data-testid='conversation-compose-box-input']" if USE_BETA_UI else None,
             "//*[@data-testid='compose-box-input']" if USE_BETA_UI else None,
@@ -454,10 +480,14 @@ def send_message(driver, message, retry_count=0):
         message_box.send_keys(Keys.CONTROL, 'a')
         message_box.send_keys(Keys.DELETE)
         try:
-            pyperclip.copy(message)
+            pyperclip.copy(original_message)
             message_box.send_keys(Keys.CONTROL, 'v')
         except Exception:
-            chunks = [message[i:i+1000] for i in range(0, len(message), 1000)] if len(message) > 1000 else [message]
+            sanitized_message = ''.join(ch for ch in original_message if ord(ch) <= 0xFFFF)
+            if sanitized_message != original_message:
+                logging.warning("Message contains non-BMP characters unsupported by ChromeDriver send_keys; sending sanitized text without those characters")
+
+            chunks = [sanitized_message[i:i+1000] for i in range(0, len(sanitized_message), 1000)] if len(sanitized_message) > 1000 else [sanitized_message]
             for idx, chunk in enumerate(chunks):
                 lines = chunk.split('\n')
                 for line_i, line in enumerate(lines):
@@ -601,7 +631,14 @@ def open_chats_check_only(numbers):
                 controlled_sleep( (DELAY_BETWEEN_CONTACTS[0]+DELAY_BETWEEN_CONTACTS[1])/2.0 ,"between checks")
         logging.info(f"CHECK SUMMARY: Total={processed} PreviouslySent={already} NotSent={fresh}")
     finally:
-        logging.info("Check-only session complete. Browser left open for manual review.")
+        if KEEP_BROWSER_OPEN:
+            logging.info("Check-only session complete. Browser left open for manual review.")
+        else:
+            try:
+                driver.quit()
+                logging.info("Check-only session complete. Browser closed cleanly (session persisted).")
+            except Exception as close_error:
+                logging.warning(f"Check-only browser close failed: {close_error}")
 
 def show_duplicate_prevention_info(sent_contacts, total_contacts):
     """Show information about duplicate prevention"""
@@ -618,6 +655,10 @@ def show_duplicate_prevention_info(sent_contacts, total_contacts):
 def balance_spreadsheet_data(data):
     """Automatically balance spreadsheet data by duplicating/removing intro messages"""
     logging.info("Balancing spreadsheet data...")
+
+    if 'IntroMessage' not in data.columns and 'Message' in data.columns:
+        data = data.copy()
+        data['IntroMessage'] = data['Message']
     
     # Get the intro message from the first row
     if len(data) > 0:
@@ -707,6 +748,10 @@ def run_campaign():
             try:
                 logging.info("Fetching Google Sheet data...")
                 data = pd.read_csv(GOOGLE_SHEET_CSV_URL)
+                if 'IntroMessage' not in data.columns and 'Message' in data.columns:
+                    data['IntroMessage'] = data['Message']
+                    logging.info("Mapped spreadsheet column 'Message' to 'IntroMessage'")
+
                 required_cols = ['Number', 'IntroMessage']
                 present_cols = [c for c in required_cols if c in data.columns]
                 data = data.dropna(subset=present_cols)
@@ -717,7 +762,8 @@ def run_campaign():
                 logging.info(f"Data columns: {list(data.columns)}")
                 logging.info(f"First few rows:")
                 for i, row in data.head(3).iterrows():
-                    logging.info(f"  Row {i}: Number='{row.get('Number', 'N/A')}', Message='{row.get('IntroMessage', 'N/A')}'")
+                    message_preview = row.get('IntroMessage', row.get('Message', 'N/A'))
+                    logging.info(f"  Row {i}: Number='{row.get('Number', 'N/A')}', Message='{message_preview}'")
                 
                 # Balance the data (duplicate/remove intro messages as needed)
                 original_data = data.copy()
@@ -795,7 +841,7 @@ def run_campaign():
             # Convert to string and remove .0 if it's a float
             number = str(raw_number).replace(".0", "").replace("+", "").replace(" ", "").strip()
             name = row.get('Name', '') if 'Name' in data.columns else ''
-            intro_msg = str(row['IntroMessage']).strip()
+            intro_msg = str(row.get('IntroMessage', row.get('Message', ''))).strip()
             
             # Show batch progress at the start of each batch
             if processed_count % BATCH_SIZE == 0:
@@ -888,13 +934,15 @@ def run_campaign():
     except Exception as e:
         logging.error(f"Unexpected error: {str(e)}")
     finally:
-        logging.info("Campaign completed. Browser will remain open for manual review.")
-        logging.info("You can manually close the browser when you're done.")
-        # Keep browser open - don't call driver.quit()
-        # try:
-        #     driver.quit()
-        # except:
-        #     pass
+        if KEEP_BROWSER_OPEN:
+            logging.info("Campaign completed. Browser left open for manual review.")
+            logging.info("Set KEEP_BROWSER_OPEN=0 to close browser automatically and avoid profile lock.")
+        else:
+            try:
+                driver.quit()
+                logging.info("Campaign completed. Browser closed cleanly (session persisted).")
+            except Exception as close_error:
+                logging.warning(f"Browser close failed: {close_error}")
 
 def main():
     run_campaign()
