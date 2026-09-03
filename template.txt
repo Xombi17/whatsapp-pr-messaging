@@ -1,14 +1,20 @@
-Hi {{name}},
+Hey {{name}} 👋
 
-This is a message from GDSC CRCE!
+Hope you're doing great!
 
-We have received your application for the junior council of 2026-27, and we are excited to invite you for the interview round.
+This is from Team GDSC CRCE. 🚀
 
-Kindly let us know your availability so that we can schedule the interview at a convenient time.
+We are excited to announce our upcoming event — Bits & Bytes (BNB)! 🔥
 
-If you have any questions or require any clarification, please feel free to reach out.
+Get ready for an incredible experience with hands-on workshops, exciting challenges, and networking opportunities.
 
-We look forward to seeing your best! 😊
+📅 Date: [Insert Date Here]
+⏰ Time: [Insert Time Here]
+📍 Venue: [Insert Venue / Campus Location]
 
-Regards,
+🔗 Register Now: [Insert Registration Link]
+
+Don't miss out! Feel free to reach out if you have any questions or need more details.
+
+Best regards,
 Team GDSC CRCE
