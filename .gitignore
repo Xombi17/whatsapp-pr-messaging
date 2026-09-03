@@ -54,7 +54,7 @@ Thumbs.db
 contacts.xlsx
 *.csv
 !contacts_sample.csv
-*.pdf
+
 *.jpg
 *.png
 *.jpeg

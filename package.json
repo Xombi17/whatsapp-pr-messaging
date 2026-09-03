@@ -5,7 +5,9 @@
   "main": "index.js",
   "scripts": {
     "start": "node index.js contacts.csv",
-    "check-availability": "node check_availability.js"
+    "check-availability": "node check_availability.js",
+    "test-pdf": "node test_send.js",
+    "test": "node test_send.js"
   },
   "repository": {
     "type": "git",

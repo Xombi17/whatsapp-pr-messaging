@@ -1,19 +1,24 @@
 const fs = require('fs');
 const path = require('path');
-const { Client, LocalAuth } = require('whatsapp-web.js');
+const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
 const { parse } = require('csv-parse/sync');
 
 // Log file to track sent messages and avoid duplicates across runs
 const LOG_FILE = './sent_log.json';
 
+// Rate Limiting & Batching Configuration
+const BATCH_SIZE = 5;                   // Process 5 contacts per batch
+const PER_CONTACT_DELAY_MIN = 2000;      // 2 seconds minimum delay between individual contacts
+const PER_CONTACT_DELAY_MAX = 5000;      // 5 seconds maximum delay between individual contacts
+const BATCH_PAUSE_MIN = 30000;           // 30 seconds minimum pause after every 5 contacts
+const BATCH_PAUSE_MAX = 40000;           // 40 seconds maximum pause after every 5 contacts
+
 // Utility helper for async delays (human-like pacing)
 const delay = ms => new Promise(res => setTimeout(res, ms));
 
 // Default message template if no template file is supplied
-const DEFAULT_TEMPLATE = `Hey {{name}} 👋
-
-Hope you're doing great!
+const DEFAULT_TEMPLATE = `Hey everyone! 👋
 
 This is from Team GDSC CRCE. 🚀
 
@@ -81,8 +86,9 @@ client.on('ready', async () => {
 
         if (!csvFile) {
             console.error('❌ Error: No CSV file provided!');
-            console.log('Usage: node index.js <path-to-contacts.csv> [path-to-template.txt]');
-            console.log('Example: node index.js contacts.csv template.txt');
+            console.log('Usage: node index.js <contacts.csv> [template.txt] [attachment.pdf]');
+            console.log('Example Text Only: node index.js contacts.csv template.txt');
+            console.log('Example Text + PDF: node index.js contacts.csv template.txt brochure.pdf');
             await client.destroy();
             process.exit(1);
         }
@@ -93,7 +99,7 @@ client.on('ready', async () => {
             process.exit(1);
         }
 
-        console.log(`📂 Reading contact records from "${csvFile}"...`);
+        console.log(`📂 Reading contact numbers from "${csvFile}"...`);
         const csvText = fs.readFileSync(csvFile, 'utf-8');
         const records = parse(csvText, { skip_empty_lines: true });
 
@@ -103,9 +109,9 @@ client.on('ready', async () => {
             process.exit(0);
         }
 
-        // Determine column indexes dynamically or fallback to standard indexes
-        let nameIndex = 2; // Default for: Year(0), Branch(1), First Name(2), Last Name(3), Phone(4)
-        let phoneIndex = 4;
+        // Determine column indexes dynamically or fallback for 1-column / multi-column CSVs
+        let phoneIndex = 0;
+        let nameIndex = -1;
         let startIndex = 0;
 
         const firstRow = records[0].map(cell => (cell || '').toString().trim().toLowerCase());
@@ -116,18 +122,28 @@ client.on('ready', async () => {
             phoneIndex = detectedPhoneIdx;
             if (detectedNameIdx !== -1) nameIndex = detectedNameIdx;
             startIndex = 1; // Skip header row
-        } else if (records[0].length === 2) {
-            nameIndex = 0;
-            phoneIndex = 1;
+        } else if (records[0].length >= 3) {
+            nameIndex = 2; // Default for: Year(0), Branch(1), First Name(2), Last Name(3), Phone(4)
+            phoneIndex = 4;
         }
 
         const allContacts = [];
         for (let i = startIndex; i < records.length; i++) {
             const row = records[i];
-            const rawName = (row[nameIndex] || '').toString().trim();
-            const rawPhone = (row[phoneIndex] || '').toString().trim();
+            
+            let rawPhone = '';
+            let rawName = '';
 
-            if (!rawPhone || rawPhone.toLowerCase() === 'phone') continue;
+            if (row.length === 1) {
+                rawPhone = (row[0] || '').toString().trim();
+            } else {
+                rawPhone = (row[phoneIndex] || row[0] || '').toString().trim();
+                if (nameIndex !== -1 && row[nameIndex]) {
+                    rawName = row[nameIndex].toString().trim();
+                }
+            }
+
+            if (!rawPhone || rawPhone.toLowerCase() === 'phone' || rawPhone.toLowerCase() === 'number') continue;
 
             // Normalize phone number into E.164 format without '+' prefix (e.g. 91XXXXXXXXXX)
             let cleanedNumber = rawPhone.replace(/\D/g, '');
@@ -145,7 +161,7 @@ client.on('ready', async () => {
             });
         }
 
-        // Load previously logged sent contacts
+        // Initialize or load sent_log.json to prevent duplicate sends
         let sentLogData = [];
         if (fs.existsSync(LOG_FILE)) {
             try {
@@ -153,20 +169,31 @@ client.on('ready', async () => {
             } catch (e) {
                 sentLogData = [];
             }
+        } else {
+            // Automatically create sent_log.json on first run
+            fs.writeFileSync(LOG_FILE, JSON.stringify([], null, 2));
+            console.log(`📄 Created log file "${LOG_FILE}" to track sent contacts.`);
         }
         const sentLog = new Set(sentLogData);
 
-        // Filter out contacts that were already messaged
+        // Filter out contacts that were already messaged in previous runs
         const uniqueContacts = [];
+        let skippedCount = 0;
         for (const contact of allContacts) {
             if (!sentLog.has(contact.number)) {
                 uniqueContacts.push(contact);
                 sentLog.add(contact.number); // Prevent intra-CSV duplicates
+            } else {
+                skippedCount++;
             }
         }
 
-        console.log(`📊 Total Valid Contacts: ${allContacts.length}`);
-        console.log(`✉️  New Contacts to Message: ${uniqueContacts.length}\n`);
+        console.log(`📊 Total Valid Phone Numbers: ${allContacts.length}`);
+        if (skippedCount > 0) {
+            console.log(`⏭️  Already Messaged Previously: ${skippedCount} (Skipped automatically)`);
+        }
+        console.log(`✉️  New Numbers to Message: ${uniqueContacts.length}`);
+        console.log(`⚙️  Batch Configuration: ${BATCH_SIZE} contacts/batch, 2-5s contact delay, 30-40s batch pause\n`);
 
         if (uniqueContacts.length === 0) {
             console.log('🎉 All contacts have already been messaged! Exiting...');
@@ -184,41 +211,74 @@ client.on('ready', async () => {
             console.log('📝 Using default message template');
         }
 
+        // Optional PDF/Media attachment handling
+        let attachmentMedia = null;
+        const defaultBnbPdf = './BNB_26_Maharashtra_Brochure.pdf';
+        const attachmentArg = process.argv[4] || (fs.existsSync(defaultBnbPdf) ? defaultBnbPdf : null);
+        if (attachmentArg && fs.existsSync(attachmentArg)) {
+            attachmentMedia = MessageMedia.fromFilePath(attachmentArg);
+            attachmentMedia.filename = "BNB'26 Maharashtra Brochure.pdf";
+            console.log(`📎 Loaded attachment file: "${attachmentArg}" (WhatsApp Display Title: "${attachmentMedia.filename}")`);
+        }
+
         console.log('\n🚀 Starting message delivery...\n');
 
-        // Loop and send messages
+        // Loop and send messages with 5-contact batching & 30-40s pauses
         for (let i = 0; i < uniqueContacts.length; i++) {
             const { number, name } = uniqueContacts[i];
             const chatId = `${number}@c.us`;
 
-            console.log(`[${i + 1}/${uniqueContacts.length}] Processing ${name ? name : 'Contact'} (${number})...`);
+            console.log(`[${i + 1}/${uniqueContacts.length}] Processing number (${number})...`);
 
             try {
                 const isRegistered = await client.isRegisteredUser(chatId);
                 if (!isRegistered) {
                     console.log(`❌ Number ${number} is not registered on WhatsApp. Skipping.`);
-                    continue;
+                } else {
+                    // Replace {{name}} placeholder if present, else fallback cleanly
+                    let finalMessage = templateText;
+                    if (templateText.includes('{{name}}')) {
+                        finalMessage = templateText.replace(/\{\{name\}\}/g, name && name.length ? name : '');
+                    }
+
+                    // Step 1: Send standalone intro text message
+                    console.log(`📤 Sending intro text message to ${number}...`);
+                    await client.sendMessage(chatId, finalMessage);
+                    console.log(`✅ Text message sent to ${number}`);
+
+                    // Step 2: Send PDF attachment as separate message if provided
+                    if (attachmentMedia) {
+                        await delay(1500); // 1.5 second pause between text and PDF
+                        console.log(`📤 Sending PDF document (${attachmentMedia.filename}) to ${number}...`);
+                        await client.sendMessage(chatId, attachmentMedia, { sendMediaAsDocument: true });
+                        console.log(`✅ PDF document sent to ${number}`);
+                    }
+
+                    // Log sent contact immediately to sent_log.json
+                    sentLogData.push(number);
+                    fs.writeFileSync(LOG_FILE, JSON.stringify(sentLogData, null, 2));
                 }
-
-                const safeName = name && name.length ? name : 'there';
-                const personalizedMessage = templateText.replace(/\{\{name\}\}/g, safeName);
-
-                await client.sendMessage(chatId, personalizedMessage);
-                console.log(`✅ Message successfully sent to ${number} (${safeName})`);
-
-                // Update sent log file immediately
-                sentLogData.push(number);
-                fs.writeFileSync(LOG_FILE, JSON.stringify(sentLogData, null, 2));
-
             } catch (err) {
                 console.error(`❌ Failed to send to ${number}:`, err.message);
             }
 
-            // Random delay between 2 to 5 seconds to simulate natural typing/pacing
-            const waitTime = Math.floor(Math.random() * (5000 - 2000 + 1) + 2000);
-            console.log(`⏳ Waiting ${ (waitTime / 1000).toFixed(1) }s before next message...`);
-            await delay(waitTime);
+            // Check if we reached the end of a 5-contact batch (and not at the very last contact)
+            const isBatchEnd = (i + 1) % BATCH_SIZE === 0;
+            const isLastContact = (i === uniqueContacts.length - 1);
+
+            if (isBatchEnd && !isLastContact) {
+                const batchPause = Math.floor(Math.random() * (BATCH_PAUSE_MAX - BATCH_PAUSE_MIN + 1) + BATCH_PAUSE_MIN);
+                console.log(`\n⏸️  [Batch Completed] Sent ${BATCH_SIZE} messages. Pausing for ${(batchPause / 1000).toFixed(1)} seconds to prevent WhatsApp rate limits and allow message forwarding...\n`);
+                await delay(batchPause);
+            } else if (!isLastContact) {
+                const contactDelay = Math.floor(Math.random() * (PER_CONTACT_DELAY_MAX - PER_CONTACT_DELAY_MIN + 1) + PER_CONTACT_DELAY_MIN);
+                console.log(`⏳ Waiting ${(contactDelay / 1000).toFixed(1)}s before next contact...`);
+                await delay(contactDelay);
+            }
         }
+
+        console.log('⏳ Waiting 8 seconds to allow WhatsApp network sync to finish...');
+        await delay(8000);
 
         console.log('\n🎉 Bulk message delivery completed successfully!');
         await client.destroy();

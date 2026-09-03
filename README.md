@@ -15,7 +15,7 @@ A robust, automated WhatsApp bulk messaging utility built using **Node.js** and 
 - 📄 **Flexible CSV Contact Parsing**: Reads contacts directly from CSV files (`Year, Branch, First Name, Last Name, Phone` or standard `Name, Phone`).
 - 📝 **Dynamic Personalized Templates**: Replaces `{{name}}` placeholders with recipient names loaded from custom template files (`template.txt`).
 - 🔄 **Smart Deduplication & Logging**: Automatically records sent messages in `sent_log.json` to prevent sending duplicate messages if re-run.
-- 🛡️ **Anti-Spam Rate Limiting**: Features randomized 2–5 second delays between messages to mimic human behavior and avoid WhatsApp flags.
+- 🛡️ **Anti-Spam Batching & Rate Limiting**: Sends messages in batches of 5 contacts with 2–5s random delays between individual messages, followed by a **30–40 second pause** between batches. This prevents WhatsApp automated spam detection and gives you time to manually forward media or follow-up details.
 - 💻 **Cross-Platform**: Operates out-of-the-box on Linux, macOS, and Windows.
 
 ---
@@ -24,14 +24,16 @@ A robust, automated WhatsApp bulk messaging utility built using **Node.js** and 
 
 ```
 whatsapp-pr-messaging/
-├── index.js                  # Main bulk messaging script
-├── check_availability.js     # Specialized utility for targeted availability checks
-├── template.txt              # Customizable message template (uses {{name}})
-├── contacts_sample.csv       # Sample CSV template file for testing
-├── package.json              # NPM configuration and scripts
-├── .gitignore                # Excludes session data, logs, and node_modules
-├── archive/                  # Legacy Python/Selenium scripts and old logs
-└── README.md                 # Complete documentation
+├── index.js                          # Main bulk messaging script
+├── test_send.js                      # Dedicated test script for message + PDF sending
+├── BNB_26_Maharashtra_Brochure.pdf   # Official BNB '26 Maharashtra Event Brochure
+├── template.txt                      # BNB PR broadcast message template
+├── contacts_sample.csv               # Sample 1-column CSV phone number file
+├── check_availability.js             # Specialized utility for targeted availability checks
+├── package.json                      # NPM configuration and scripts
+├── .gitignore                        # Excludes session data, logs, and node_modules
+├── archive/                          # Legacy Python/Selenium scripts and old logs
+└── README.md                         # Complete documentation
 ```
 
 > **Note**: Upon first run, `.wwebjs_auth/` (session storage) and `sent_log.json` (delivery history) will be created automatically. These are git-ignored to protect privacy and session security.
@@ -62,14 +64,16 @@ npm install
 
 ### Step 1: Prepare your Contacts CSV File
 
-Create a CSV file (e.g., `contacts.csv` or copy `contacts_sample.csv`). Ensure it includes names and phone numbers.
+Create a CSV file (e.g., `contacts.csv` or copy `contacts_sample.csv`). You can provide a simple single-column list of phone numbers (no names required):
 
-**Example CSV Format (`contacts.csv`):**
+**Simple Phone-Only CSV Format (`contacts.csv`):**
 ```csv
-Year,Branch,First Name,Last Name,Phone
-FE,COMP,Alex,Morgan,9876543210
-FE,IT,Jordan,Lee,919876543211
+Phone
+9876543210
+919876543211
 ```
+
+*(Note: Multi-column CSVs containing `Name` and `Phone` columns are also automatically supported).*
 
 * **Phone Number Formatting**: Phone numbers can be 10 digits (e.g., `9876543210` — Indian numbers will automatically receive `91` country code prefix) or full E.164 without `+` (e.g., `919876543211`).
 
@@ -102,11 +106,22 @@ Team GDSC CRCE
 Execute the messenger script using Node.js:
 
 ```bash
-# Run with default contacts.csv
+# 1. Text-Only Mode (uses default contacts.csv and template.txt)
 npm start
 
-# Or specify a custom CSV file and custom template file:
-node index.js interview_contacts.csv custom_template.txt
+# 2. Custom CSV & Template File
+node index.js contacts.csv template.txt
+
+### Testing PDF + Intro Message Sending
+
+A dedicated test script [test_send.js](file:///home/varad/Documents/gdsc/whatsapp-pr-messaging/test_send.js) is provided for test runs:
+
+```bash
+# Run test script with BNB brochure and test contacts
+npm test
+
+# Or specify custom test contacts, template, and PDF:
+node test_send.js test_contacts.csv template.txt BNB_26_Maharashtra_Brochure.pdf
 ```
 
 ---
