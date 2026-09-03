@@ -52,11 +52,14 @@ Thumbs.db
 
 # Project specific
 contacts.xlsx
+*.csv
+!contacts_sample.csv
 *.pdf
 *.jpg
 *.png
 *.jpeg
 whatsapp_sender_*.log
+
 
 # Environment variables
 .env

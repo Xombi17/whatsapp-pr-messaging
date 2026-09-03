@@ -93,8 +93,7 @@ client.on('ready', async () => {
         process.exit(0);
     }
 
-    try {
-        const csvFile = './interview1.csv';
+        const csvFile = process.argv[2] || (fs.existsSync('./contacts.csv') ? './contacts.csv' : './contacts_sample.csv');
 
         if (!fs.existsSync(csvFile)) {
             throw new Error(`CSV file not found: ${csvFile}`);
