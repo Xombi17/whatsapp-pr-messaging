@@ -18,8 +18,23 @@ const BATCH_PAUSE_MAX = 40000;           // 40 seconds maximum pause after every
 const delay = ms => new Promise(res => setTimeout(res, ms));
 
 // Default text fallbacks if text files are missing
-const DEFAULT_INTRO = "Hey! Team GDSC CRCE here. Hope you're doing great!";
-const DEFAULT_PR_MESSAGE = `We are excited to announce our upcoming flagship event — Bits & Bytes (BNB)! 🔥\n\nGet ready for an incredible experience with hands-on workshops, exciting challenges, and networking opportunities.`;
+const DEFAULT_INTRO = `Hi {{name}},
+
+Varad here from GDSC CRCE 
+
+We have received your application for the junior council of 2026-27, we are happy to invite you for the interview round.
+The interview will be conducted offline during the coming week.
+
+Kindly let me know your availability so that we can schedule the interview at a convenient time.
+
+I will be your point of contact throughout the selection process. If you have any questions or require any clarification, please feel free to reach out.
+
+We look forward to seeing your best 😊
+
+Regards,
+Team GDSC CRCE`;
+
+const DEFAULT_PR_MESSAGE = `Hey this is Varad from GDG CRCE. We are excited to announce that we are back with our flagship international hackathon BIT N BUILD. Looking forward to see you there!`;
 
 /**
  * Configure Puppeteer launch options cross-platform (Windows, macOS, Linux).

@@ -172,14 +172,14 @@ client.on('ready', async () => {
 
         // 3. Load Message Files & Media
         // Step 1 Text: Intro Message
-        let introText = "Hey! Team GDSC CRCE here. Hope you're doing great!";
+        let introText = `Hi {{name}},\n\nVarad here from GDSC CRCE \n\nWe have received your application for the junior council of 2026-27, we are happy to invite you for the interview round.\nThe interview will be conducted offline during the coming week.\n\nKindly let me know your availability so that we can schedule the interview at a convenient time.\n\nI will be your point of contact throughout the selection process. If you have any questions or require any clarification, please feel free to reach out.\n\nWe look forward to seeing your best 😊\n\nRegards,\nTeam GDSC CRCE`;
         if (fs.existsSync(introFile)) {
             introText = fs.readFileSync(introFile, 'utf-8').trim();
             console.log(`📝 Loaded Intro Message from "${introFile}"`);
         }
 
         // Step 2 Caption: PR Message
-        let prMessageText = "We are excited to announce our upcoming flagship event — Bits & Bytes (BNB)! 🔥\n\nGet ready for an incredible experience with hands-on workshops, exciting challenges, and networking opportunities.";
+        let prMessageText = "Hey this is Varad from GDG CRCE. We are excited to announce that we are back with our flagship international hackathon BIT N BUILD. Looking forward to see you there!";
         if (fs.existsSync(templateFile)) {
             prMessageText = fs.readFileSync(templateFile, 'utf-8').trim();
             console.log(`📝 Loaded PR Message Caption from "${templateFile}"`);
