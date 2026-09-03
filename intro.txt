@@ -1,15 +1,1 @@
-Hi {{name}},
-
-Varad here from GDSC CRCE 
-
-We have received your application for the junior council of 2026-27, we are happy to invite you for the interview round.
-The interview will be conducted offline during the coming week.
-
-Kindly let me know your availability so that we can schedule the interview at a convenient time.
-
-I will be your point of contact throughout the selection process. If you have any questions or require any clarification, please feel free to reach out.
-
-We look forward to seeing your best 😊
-
-Regards,
-Team GDSC CRCE
+Hey this is Varad from GDG CRCE. We are excited to announce that we are back with our flagship international hackathon BIT N BUILD. Looking forward to see you there!
