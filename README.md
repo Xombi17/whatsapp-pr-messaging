@@ -1,204 +1,178 @@
-# WhatsApp Bulk Messenger
+# 📱 WhatsApp Web Bulk Messenger (`whatsapp-web.js`)
 
-A robust, automated WhatsApp bulk messaging tool built with Python and Selenium. Perfect for sending promotional messages, announcements, or any bulk communication needs.
+[![Node.js](https://img.shields.io/badge/Node.js-v16%2B-green.svg)](https://nodejs.org/)
+[![whatsapp-web.js](https://img.shields.io/badge/whatsapp--web.js-v1.34.6-brightgreen.svg)](https://wwebjs.dev/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
+A robust, automated WhatsApp bulk messaging utility built using **Node.js** and **`whatsapp-web.js`**. Designed for student organizations, teams, and committees (e.g., GDSC) to automate event announcements, interview invitations, and member updates reliably.
+
+---
 
 ## ✨ Features
 
-- **Bulk Messaging**: Send messages to hundreds of contacts automatically
-- **Google Sheets Integration**: Load contacts directly from Google Sheets
-- **Persistent Sessions**: Maintains WhatsApp Web login across sessions
-- **Smart Retry Logic**: Automatic retry on failures with configurable limits
-- **Human-like Behavior**: Random delays and natural interaction patterns
-- **Comprehensive Logging**: Detailed logs for monitoring and debugging
-- **Cross-platform**: Works on Windows, macOS, and Linux
-- **No Contact Saving**: Sends messages without saving numbers to contacts
-- **Text-Only Messages**: Currently supports text messages (no attachments)
+- 📲 **QR Code Terminal Auth**: Log in quickly by scanning a terminal QR code with WhatsApp's "Linked Devices".
+- 🔐 **Persistent Session Management**: Session data is cached locally via `LocalAuth` so you only scan the QR code once.
+- 📄 **Flexible CSV Contact Parsing**: Reads contacts directly from CSV files (`Year, Branch, First Name, Last Name, Phone` or standard `Name, Phone`).
+- 📝 **Dynamic Personalized Templates**: Replaces `{{name}}` placeholders with recipient names loaded from custom template files (`template.txt`).
+- 🔄 **Smart Deduplication & Logging**: Automatically records sent messages in `sent_log.json` to prevent sending duplicate messages if re-run.
+- 🛡️ **Anti-Spam Rate Limiting**: Features randomized 2–5 second delays between messages to mimic human behavior and avoid WhatsApp flags.
+- 💻 **Cross-Platform**: Operates out-of-the-box on Linux, macOS, and Windows.
+
+---
+
+## 📁 Repository Structure
+
+```
+whatsapp-pr-messaging/
+├── index.js                  # Main bulk messaging script
+├── check_availability.js     # Specialized utility for targeted availability checks
+├── template.txt              # Customizable message template (uses {{name}})
+├── contacts_sample.csv       # Sample CSV template file for testing
+├── package.json              # NPM configuration and scripts
+├── .gitignore                # Excludes session data, logs, and node_modules
+├── archive/                  # Legacy Python/Selenium scripts and old logs
+└── README.md                 # Complete documentation
+```
+
+> **Note**: Upon first run, `.wwebjs_auth/` (session storage) and `sent_log.json` (delivery history) will be created automatically. These are git-ignored to protect privacy and session security.
+
+---
 
 ## 🚀 Quick Start
 
 ### Prerequisites
 
-- Python 3.8 or higher
-- Google Chrome browser
-- ChromeDriver (matching your Chrome version)
-- Google Sheets with contact data
+- **Node.js**: v16.x or higher ([Download Node.js](https://nodejs.org/))
+- **Google Chrome** or **Chromium** browser installed on your machine
+- A WhatsApp account on your mobile phone
 
-### Installation
+### 1. Clone & Install
 
-1. **Clone the repository:**
-   ```bash
-   git clone <your-repo-url>
-   cd whatsapp-bulk-messenger
-   ```
-
-2. **Install dependencies:**
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-3. **Setup ChromeDriver:**
-   - Download ChromeDriver from [https://chromedriver.chromium.org/](https://chromedriver.chromium.org/)
-   - Choose the version that matches your Chrome browser version
-   - Extract the `chromedriver.exe` file
-   - Place `chromedriver.exe` in the same folder as `whatsapp_bulk.py`
-   - **Note**: The script will automatically use the local `chromedriver.exe` if available
-   - **Verify**: Your folder should contain both `whatsapp_bulk.py` and `chromedriver.exe`
-
-4. **Prepare your Google Sheet:**
-   - Create a Google Sheet with columns: `Number`, `IntroMessage`, `Name` (optional)
-   - Make it publicly accessible via CSV export
-   - Update the `GOOGLE_SHEET_CSV_URL` in the script
-
-5. **Run the script:**
-   ```bash
-   python whatsapp_bulk.py
-   ```
-
-## 📋 Configuration
-
-### Environment Variables (Optional)
+Clone this repository and install the dependencies:
 
 ```bash
-# Speed controls
-DELAY_MIN=2          # Minimum delay between contacts (seconds)
-DELAY_MAX=5          # Maximum delay between contacts (seconds)
-
-# Retry settings
-MAX_RETRIES=2        # Maximum retry attempts for failed operations
-
-# Timeouts
-CHAT_LOAD_TIMEOUT=20     # Time to wait for chat to load
-MESSAGE_SEND_TIMEOUT=5   # Time to wait for message send
-WHATSAPP_LOAD_TIMEOUT=45 # Time to wait for WhatsApp to load
-
-# Limits
-CONTACT_LIMIT=999999     # Maximum contacts to process
-DISABLE_IMAGES=1         # Disable image loading for faster performance
-```
-
-### Google Sheet Format
-
-Your Google Sheet should have these columns:
-
-| Number | IntroMessage | Name (optional) |
-|--------|--------------|-----------------|
-| 919876543210 | Hello! This is our announcement... | John Doe |
-| 919876543211 | Hello! This is our announcement... | Jane Smith |
-
-**Important**: Phone numbers should be in international format without the '+' symbol (e.g., 919876543210 for India, 447123456789 for UK).
-
-## 🔧 How It Works
-
-1. **Data Loading**: Fetches contact data from Google Sheets
-2. **WhatsApp Web**: Opens WhatsApp Web in Chrome
-3. **Contact Processing**: For each contact:
-   - Opens chat using direct URL or search
-   - Sends intro message
-   - Logs success/failure
-4. **Session Management**: Maintains persistent Chrome profile
-5. **Error Handling**: Retries failed operations with exponential backoff
-
-## 📱 Message Sending
-
-The script sends:
-- **Intro Message**: Personalized message from your Google Sheet
-- **Text Only**: Currently configured for text-only messages (no PDFs, images, or documents)
-- **Smart Fallbacks**: Multiple methods to open chats if one fails
-
-## 🛠️ Troubleshooting
-
-### Common Issues
-
-1. **Chrome Driver Issues:**
-   - Ensure Chrome browser is updated
-   - Verify `chromedriver.exe` is in the same folder as the script
-   - Check that ChromeDriver version matches your Chrome browser version
-   - Delete `chrome_profile` folder if authentication fails
-   - **Windows users**: Make sure `chromedriver.exe` is not blocked by Windows Defender
-
-2. **WhatsApp Web Issues:**
-   - Check internet connection
-   - Verify WhatsApp Web is accessible
-   - Clear browser cache if needed
-
-3. **Contact Loading Issues:**
-   - Verify Google Sheet is publicly accessible
-   - Check CSV format and column names
-   - Ensure phone numbers are in international format
-
-### Debug Mode
-
-The script includes comprehensive logging:
-- All operations are logged to console and file
-- Log files are created with timestamps
-- Detailed error messages for troubleshooting
-
-## 📊 Performance
-
-- **Speed**: 2-5 seconds between contacts (configurable)
-- **Reliability**: 99%+ success rate with retry logic
-- **Scalability**: Tested with 100+ contacts
-- **Resource Usage**: Minimal memory and CPU usage
-
-## 🔒 Security & Privacy
-
-- **No Data Storage**: Contact data is not stored locally
-- **Session Isolation**: Each run uses a separate Chrome profile
-- **No API Keys**: Uses only WhatsApp Web interface
-- **Local Processing**: All data processing happens locally
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests if applicable
-5. Submit a pull request
-
-## 📄 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## ⚠️ Disclaimer
-
-This tool is for educational and legitimate business purposes only. Please:
-- Respect WhatsApp's terms of service
-- Don't spam or send unsolicited messages
-- Use reasonable delays between messages
-- Comply with local laws and regulations
-
-## 🆘 Support
-
-If you encounter issues:
-1. Check the troubleshooting section
-2. Review the logs for error details
-3. Open an issue on GitHub with:
-   - Error message
-   - Log output
-   - Steps to reproduce
-
-## 📈 Roadmap
-
-- [ ] Image and document attachment support
-- [ ] Template message system
-- [ ] Scheduled messaging
-- [ ] Analytics dashboard
-- [ ] Multi-account support
-- [ ] API endpoints
-
-## 📁 Project Structure
-
-```
-whatsapp-bulk-messenger/
-├── whatsapp_bulk.py          # Main script
-├── chromedriver.exe          # ChromeDriver executable (user adds this)
-├── README.md                 # This documentation
-├── requirements.txt          # Python dependencies
-├── LICENSE                   # MIT License
-├── .gitignore               # Git ignore rules
-└── setup.py                 # Python package setup
+git clone https://github.com/Xombi17/whatsapp-pr-messaging.git
+cd whatsapp-pr-messaging
+npm install
 ```
 
 ---
 
-**Made with ❤️ for efficient communication**
+## 📖 Step-by-Step Usage Guide
+
+### Step 1: Prepare your Contacts CSV File
+
+Create a CSV file (e.g., `contacts.csv` or copy `contacts_sample.csv`). Ensure it includes names and phone numbers.
+
+**Example CSV Format (`contacts.csv`):**
+```csv
+Year,Branch,First Name,Last Name,Phone
+FE,COMP,Alex,Morgan,9876543210
+FE,IT,Jordan,Lee,919876543211
+```
+
+* **Phone Number Formatting**: Phone numbers can be 10 digits (e.g., `9876543210` — Indian numbers will automatically receive `91` country code prefix) or full E.164 without `+` (e.g., `919876543211`).
+
+---
+
+### Step 2: Customize Your Message Template
+
+Edit `template.txt` or create a custom text file. Use the `{{name}}` placeholder where you want recipient names injected.
+
+**Example `template.txt`:**
+```text
+Hi {{name}},
+
+This is Varad from GDSC CRCE!
+
+We have received your application for the Junior Council 2026-27, and we are excited to invite you for the interview round.
+
+Kindly let us know your availability so that we can schedule your interview slot.
+
+We look forward to seeing your best! 😊
+
+Regards,
+Team GDSC CRCE
+```
+
+---
+
+### Step 3: Run the Bulk Messenger
+
+Execute the messenger script using Node.js:
+
+```bash
+# Run with default contacts.csv
+npm start
+
+# Or specify a custom CSV file and custom template file:
+node index.js interview_contacts.csv custom_template.txt
+```
+
+---
+
+### Step 4: Scan the QR Code
+
+1. When you start the script for the first time, a **QR Code** will render directly in your terminal.
+2. Open **WhatsApp** on your mobile phone.
+3. Go to **Settings / Menu** > **Linked Devices** > **Link a Device**.
+4. Scan the terminal QR Code.
+5. Once authenticated, the script will process the contacts automatically!
+
+---
+
+## 🛠️ Additional Tools & Scripts
+
+### Availability Check Utility
+
+If you need to send follow-ups or check availability for specific candidates, use `check_availability.js`:
+
+```bash
+# Run availability check script
+npm run check-availability
+
+# Run in test mode (sends a single test message)
+node check_availability.js --test
+```
+
+### Custom Chrome Executable Path
+
+If Puppeteer fails to find your local Google Chrome binary, set the `PUPPETEER_EXECUTABLE_PATH` environment variable:
+
+```bash
+# Linux
+export PUPPETEER_EXECUTABLE_PATH=/usr/bin/google-chrome
+
+# Windows (PowerShell)
+$env:PUPPETEER_EXECUTABLE_PATH="C:\Program Files\Google\Chrome\Application\chrome.exe"
+```
+
+---
+
+## 🛡️ Best Practices & Responsible Use
+
+1. **Avoid Spamming**: Only message contacts who have opted in or applied for your program/event.
+2. **Start Small**: Test your messaging flow with a small CSV file (2–3 test numbers) before running large broadcasts.
+3. **Respect Delays**: The script includes a 2–5 second random wait between messages. Do not remove this delay, as sending messages too quickly can result in temporary WhatsApp suspensions.
+4. **Session Reset**: If you need to switch WhatsApp accounts, delete the `.wwebjs_auth/` folder and re-run the script to scan a new QR code.
+
+---
+
+## ❓ Troubleshooting
+
+| Issue | Cause | Solution |
+| :--- | :--- | :--- |
+| `Error: Cannot find module` | Missing node dependencies | Run `npm install` in the project directory. |
+| Chrome fails to launch | Browser path mismatch | Install Google Chrome or set `PUPPETEER_EXECUTABLE_PATH`. |
+| `Number is not registered` | Invalid phone number | Check CSV phone format. The script safely skips unregistered numbers. |
+| QR Code repeats endlessly | Disconnected session | Clear `.wwebjs_auth/` folder and re-scan the QR code. |
+
+---
+
+## 📄 License
+
+Distributed under the MIT License. See `LICENSE` for details.
+
+---
+
+**Crafted with ❤️ for GDSC CRCE & Community Leaders**

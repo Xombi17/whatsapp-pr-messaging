@@ -1,0 +1,14 @@
+Hi {{name}},
+
+This is a message from GDSC CRCE!
+
+We have received your application for the junior council of 2026-27, and we are excited to invite you for the interview round.
+
+Kindly let us know your availability so that we can schedule the interview at a convenient time.
+
+If you have any questions or require any clarification, please feel free to reach out.
+
+We look forward to seeing your best! 😊
+
+Regards,
+Team GDSC CRCE

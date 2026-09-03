@@ -100,3 +100,8 @@ trace/
 node_modules/
 .wwebjs_auth/
 .wwebjs_cache/
+sent_log.json
+sent_log*.json
+check_availability_log.json
+check_availability_log*.json
+

@@ -1,18 +1,25 @@
 {
-  "name": "whatsapp-pr-messaging",
+  "name": "whatsapp-bulk-messenger",
   "version": "1.0.0",
-  "description": "A robust, automated WhatsApp bulk messaging tool built with Python and Selenium. Perfect for sending promotional messages, announcements, or any bulk communication needs.",
+  "description": "Automated WhatsApp bulk messaging tool built with Node.js and whatsapp-web.js",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node index.js contacts.csv",
+    "check-availability": "node check_availability.js"
   },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/Xombi17/whatsapp-pr-messaging.git"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
+  "keywords": [
+    "whatsapp",
+    "bulk-messaging",
+    "whatsapp-web.js",
+    "automation",
+    "gdsc"
+  ],
+  "author": "GDSC Team",
+  "license": "MIT",
   "type": "commonjs",
   "bugs": {
     "url": "https://github.com/Xombi17/whatsapp-pr-messaging/issues"
@@ -24,3 +31,4 @@
     "whatsapp-web.js": "^1.34.6"
   }
 }
+

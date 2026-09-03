@@ -41,13 +41,23 @@ Regards,
 Varad Joshi
 Team GDSC CRCE`;
 
+function getPuppeteerOptions() {
+    const options = {
+        args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
+    };
+    if (process.env.PUPPETEER_EXECUTABLE_PATH) {
+        options.executablePath = process.env.PUPPETEER_EXECUTABLE_PATH;
+    } else if (process.platform === 'linux' && fs.existsSync('/opt/google/chrome/google-chrome')) {
+        options.executablePath = '/opt/google/chrome/google-chrome';
+    }
+    return options;
+}
+
 const client = new Client({
     authStrategy: new LocalAuth(),
-    puppeteer: {
-        executablePath: '/opt/google/chrome/google-chrome',
-        args: ['--no-sandbox', '--disable-setuid-sandbox']
-    }
+    puppeteer: getPuppeteerOptions()
 });
+
 
 client.on('qr', (qr) => {
     qrcode.generate(qr, { small: true });
