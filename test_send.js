@@ -6,6 +6,7 @@ const { parse } = require('csv-parse/sync');
 
 // Configuration Defaults for the Test Script
 const DEFAULT_CSV = './test_contacts.csv';
+const DEFAULT_INTRO = './intro.txt';
 const DEFAULT_TEMPLATE = './template.txt';
 const DEFAULT_PDF = './BNB_26_Maharashtra_Brochure.pdf';
 const LOG_FILE = './sent_log.json';
@@ -14,7 +15,7 @@ const LOG_FILE = './sent_log.json';
 const delay = ms => new Promise(res => setTimeout(res, ms));
 
 /**
- * Configure Puppeteer launch options cross-platform.
+ * Configure Puppeteer launch options cross-platform (Windows, macOS, Linux).
  */
 function getPuppeteerOptions() {
     const options = {
@@ -22,6 +23,9 @@ function getPuppeteerOptions() {
             '--no-sandbox',
             '--disable-setuid-sandbox',
             '--disable-dev-shm-usage',
+            '--disable-accelerated-2d-canvas',
+            '--no-first-run',
+            '--no-zygote',
             '--disable-gpu'
         ]
     };
@@ -30,6 +34,16 @@ function getPuppeteerOptions() {
         options.executablePath = process.env.PUPPETEER_EXECUTABLE_PATH;
     } else if (process.platform === 'linux' && fs.existsSync('/opt/google/chrome/google-chrome')) {
         options.executablePath = '/opt/google/chrome/google-chrome';
+    } else if (process.platform === 'darwin' && fs.existsSync('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome')) {
+        options.executablePath = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+    } else if (process.platform === 'win32') {
+        const winChrome64 = 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
+        const winChrome32 = 'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe';
+        if (fs.existsSync(winChrome64)) {
+            options.executablePath = winChrome64;
+        } else if (fs.existsSync(winChrome32)) {
+            options.executablePath = winChrome32;
+        }
     }
 
     return options;
@@ -53,24 +67,13 @@ client.on('ready', async () => {
 
     try {
         const csvFile = process.argv[2] || DEFAULT_CSV;
-        const templateFile = process.argv[3] || DEFAULT_TEMPLATE;
-        const pdfFile = process.argv[4] || DEFAULT_PDF;
+        const introFile = process.argv[3] || DEFAULT_INTRO;
+        const templateFile = process.argv[4] || DEFAULT_TEMPLATE;
+        const pdfFile = process.argv[5] || DEFAULT_PDF;
 
         // 1. Verify Files Exist
         if (!fs.existsSync(csvFile)) {
             console.error(`❌ Error: Test CSV file "${csvFile}" not found.`);
-            await client.destroy();
-            process.exit(1);
-        }
-
-        if (!fs.existsSync(templateFile)) {
-            console.error(`❌ Error: Template file "${templateFile}" not found.`);
-            await client.destroy();
-            process.exit(1);
-        }
-
-        if (!fs.existsSync(pdfFile)) {
-            console.error(`❌ Error: PDF brochure file "${pdfFile}" not found.`);
             await client.destroy();
             process.exit(1);
         }
@@ -122,7 +125,9 @@ client.on('ready', async () => {
             let cleanedNumber = rawPhone.replace(/\D/g, '');
             if (cleanedNumber.length === 10) {
                 cleanedNumber = '91' + cleanedNumber;
-            } else if (!(cleanedNumber.startsWith('91') && cleanedNumber.length === 12)) {
+            }
+
+            if (cleanedNumber.length < 11 || cleanedNumber.length > 15) {
                 console.log(`⚠️ Skipping invalid test phone number "${rawPhone}"`);
                 continue;
             }
@@ -165,37 +170,47 @@ client.on('ready', async () => {
             process.exit(0);
         }
 
-        // 3. Load Message Template & Attachments
-        console.log(`📝 Loading message template from "${templateFile}"...`);
-        const templateText = fs.readFileSync(templateFile, 'utf-8');
+        // 3. Load Message Files & Media
+        // Step 1 Text: Intro Message
+        let introText = "Hey! Team GDSC CRCE here. Hope you're doing great!";
+        if (fs.existsSync(introFile)) {
+            introText = fs.readFileSync(introFile, 'utf-8').trim();
+            console.log(`📝 Loaded Intro Message from "${introFile}"`);
+        }
 
-        console.log(`📎 Loading PDF brochure attachment from "${pdfFile}"...`);
-        const pdfMedia = MessageMedia.fromFilePath(pdfFile);
-        pdfMedia.filename = "BNB'26 Maharashtra Brochure.pdf";
+        // Step 2 Caption: PR Message
+        let prMessageText = "We are excited to announce our upcoming flagship event — Bits & Bytes (BNB)! 🔥\n\nGet ready for an incredible experience with hands-on workshops, exciting challenges, and networking opportunities.";
+        if (fs.existsSync(templateFile)) {
+            prMessageText = fs.readFileSync(templateFile, 'utf-8').trim();
+            console.log(`📝 Loaded PR Message Caption from "${templateFile}"`);
+        }
 
-        // Check for optional poster image (e.g. poster.jpg, poster.png, poster.jpeg)
+        // Step 2 Image: Poster Image
         let posterMedia = null;
         const posterCandidates = ['./poster.jpg', './poster.png', './poster.jpeg', './BNB_Poster.jpg', './BNB_Poster.png'];
-        const customPosterArg = process.argv[5];
-        let posterPath = customPosterArg;
-
-        if (!posterPath) {
-            for (const cand of posterCandidates) {
-                if (fs.existsSync(cand)) {
-                    posterPath = cand;
-                    break;
-                }
+        let posterPath = null;
+        for (const cand of posterCandidates) {
+            if (fs.existsSync(cand)) {
+                posterPath = cand;
+                break;
             }
         }
-
-        if (posterPath && fs.existsSync(posterPath)) {
+        if (posterPath) {
             posterMedia = MessageMedia.fromFilePath(posterPath);
-            console.log(`🖼️  Loaded poster image: "${posterPath}"`);
+            console.log(`🖼️  Loaded Poster Image from "${posterPath}"`);
         }
 
-        console.log(`\n🚀 Starting test delivery to ${contactsToProcess.length} recipient(s)...\n`);
+        // Step 3 Document: PDF Brochure
+        let pdfMedia = null;
+        if (fs.existsSync(pdfFile)) {
+            pdfMedia = MessageMedia.fromFilePath(pdfFile);
+            pdfMedia.filename = "BNB'26 Maharashtra Brochure.pdf";
+            console.log(`📎 Loaded PDF Brochure from "${pdfFile}" (Display Name: "${pdfMedia.filename}")`);
+        }
 
-        // 4. Send Message + PDF to each test contact
+        console.log(`\n🚀 Executing 3-Step Sequence for ${contactsToProcess.length} recipient(s):\n 1. Intro Message\n 2. Poster Image + PR Caption\n 3. PDF Brochure Document\n`);
+
+        // 4. Execute 3-Step Sequence for each contact
         for (let i = 0; i < contactsToProcess.length; i++) {
             const { number, name } = contactsToProcess[i];
             const chatId = `${number}@c.us`;
@@ -209,43 +224,56 @@ client.on('ready', async () => {
                     continue;
                 }
 
-                let finalMessage = templateText;
-                if (templateText.includes('{{name}}')) {
-                    finalMessage = templateText.replace(/\{\{name\}\}/g, name && name.length ? name : '');
-                }
+                let finalIntro = introText;
+                let finalPR = prMessageText;
 
-                if (posterMedia) {
-                    // Send Poster Image with PR Message as Caption
-                    console.log(`📤 [1/2] Sending poster image with PR message caption to ${number}...`);
-                    await client.sendMessage(chatId, posterMedia, { caption: finalMessage });
-                    console.log(`✅ Poster image with PR caption sent!`);
+                if (name && name.length) {
+                    finalIntro = finalIntro.replace(/\{\{name\}\}/g, name);
+                    finalPR = finalPR.replace(/\{\{name\}\}/g, name);
                 } else {
-                    // Send Standalone Text Message
-                    console.log(`📤 [1/2] Sending standalone intro text message to ${number}...`);
-                    await client.sendMessage(chatId, finalMessage);
-                    console.log(`✅ Text message sent!`);
+                    finalIntro = finalIntro.replace(/\{\{name\}\}/g, '');
+                    finalPR = finalPR.replace(/\{\{name\}\}/g, '');
                 }
 
-                // Send PDF attachment as a separate message
+                // ── STEP 1: Send Intro Message ─────────────────────────────────────
+                console.log(`📤 [Step 1/3] Sending Intro Text Message to ${number}...`);
+                await client.sendMessage(chatId, finalIntro);
+                console.log(`✅ Intro Text Message Sent!`);
+
+                await delay(1500); // 1.5s pause between Step 1 and Step 2
+
+                // ── STEP 2: Send Poster Image + Attached PR Message Caption ───────
+                if (posterMedia) {
+                    console.log(`📤 [Step 2/3] Sending Poster Image with attached PR Message Caption...`);
+                    await client.sendMessage(chatId, posterMedia, { caption: finalPR });
+                    console.log(`✅ Poster Image + PR Caption Sent!`);
+                } else {
+                    console.log(`📤 [Step 2/3] Sending PR Message Text...`);
+                    await client.sendMessage(chatId, finalPR);
+                    console.log(`✅ PR Message Text Sent!`);
+                }
+
+                await delay(1500); // 1.5s pause between Step 2 and Step 3
+
+                // ── STEP 3: Send PDF Brochure Document ────────────────────────────
                 if (pdfMedia) {
-                    await delay(1500); // 1.5s pause between poster/text and PDF
-                    console.log(`📤 [2/2] Sending PDF attachment ("${pdfMedia.filename}") to ${number}...`);
+                    console.log(`📤 [Step 3/3] Sending PDF Brochure Document ("${pdfMedia.filename}")...`);
                     await client.sendMessage(chatId, pdfMedia, { sendMediaAsDocument: true });
-                    console.log(`✅ PDF document sent!`);
+                    console.log(`✅ PDF Brochure Document Sent!`);
                 }
 
                 // Record sent log
                 sentLogData.push(number);
                 fs.writeFileSync(LOG_FILE, JSON.stringify(sentLogData, null, 2));
 
-                console.log(`✅ TEST SUCCESS: Messages sent to ${number}!\n`);
+                console.log(`🎉 SUCCESS: Complete 3-step sequence delivered to ${number}!\n`);
 
             } catch (err) {
-                console.error(`❌ TEST FAILED for ${number}:`, err.message);
+                console.error(`❌ FAILED for ${number}:`, err.message);
             }
 
             if (i < contactsToProcess.length - 1) {
-                console.log('⏳ Waiting 5 seconds before next test recipient...');
+                console.log('⏳ Waiting 5 seconds before next recipient...');
                 await delay(5000);
             }
         }
@@ -253,12 +281,12 @@ client.on('ready', async () => {
         console.log('⏳ Waiting 10 seconds to allow WhatsApp network sync to finish...');
         await delay(10000);
 
-        console.log('\n🎉 [TEST COMPLETE] Test run finished!');
+        console.log('\n🎉 [COMPLETE] All 3 steps executed successfully for all recipients!');
         await client.destroy();
         process.exit(0);
 
     } catch (error) {
-        console.error('❌ Test script error:', error);
+        console.error('❌ Script execution error:', error);
         if (client) await client.destroy();
         process.exit(1);
     }

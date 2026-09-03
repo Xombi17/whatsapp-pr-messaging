@@ -17,30 +17,12 @@ const BATCH_PAUSE_MAX = 40000;           // 40 seconds maximum pause after every
 // Utility helper for async delays (human-like pacing)
 const delay = ms => new Promise(res => setTimeout(res, ms));
 
-// Default message template if no template file is supplied
-const DEFAULT_TEMPLATE = `Hey everyone! 👋
-
-This is from Team GDSC CRCE. 🚀
-
-We are excited to announce our upcoming event — Bits & Bytes (BNB)! 🔥
-
-Get ready for an incredible experience with hands-on workshops, exciting challenges, and networking opportunities.
-
-📅 Date: [Insert Date Here]
-⏰ Time: [Insert Time Here]
-📍 Venue: [Insert Venue / Campus Location]
-
-🔗 Register Now: [Insert Registration Link]
-
-Don't miss out! Feel free to reach out if you have any questions or need more details.
-
-Best regards,
-Team GDSC CRCE`;
+// Default text fallbacks if text files are missing
+const DEFAULT_INTRO = "Hey! Team GDSC CRCE here. Hope you're doing great!";
+const DEFAULT_PR_MESSAGE = `We are excited to announce our upcoming flagship event — Bits & Bytes (BNB)! 🔥\n\nGet ready for an incredible experience with hands-on workshops, exciting challenges, and networking opportunities.`;
 
 /**
- * Configure Puppeteer launch options cross-platform.
- * Uses environment variable PUPPETEER_EXECUTABLE_PATH if set,
- * or checks for system Chrome, otherwise lets Puppeteer use bundled Chromium.
+ * Configure Puppeteer launch options cross-platform (Windows, macOS, Linux).
  */
 function getPuppeteerOptions() {
     const options = {
@@ -59,6 +41,16 @@ function getPuppeteerOptions() {
         options.executablePath = process.env.PUPPETEER_EXECUTABLE_PATH;
     } else if (process.platform === 'linux' && fs.existsSync('/opt/google/chrome/google-chrome')) {
         options.executablePath = '/opt/google/chrome/google-chrome';
+    } else if (process.platform === 'darwin' && fs.existsSync('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome')) {
+        options.executablePath = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+    } else if (process.platform === 'win32') {
+        const winChrome64 = 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
+        const winChrome32 = 'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe';
+        if (fs.existsSync(winChrome64)) {
+            options.executablePath = winChrome64;
+        } else if (fs.existsSync(winChrome32)) {
+            options.executablePath = winChrome32;
+        }
     }
 
     return options;
@@ -86,9 +78,8 @@ client.on('ready', async () => {
 
         if (!csvFile) {
             console.error('❌ Error: No CSV file provided!');
-            console.log('Usage: node index.js <contacts.csv> [template.txt] [attachment.pdf]');
-            console.log('Example Text Only: node index.js contacts.csv template.txt');
-            console.log('Example Text + PDF: node index.js contacts.csv template.txt brochure.pdf');
+            console.log('Usage: node index.js <contacts.csv> [intro.txt] [template.txt] [brochure.pdf] [poster.jpg]');
+            console.log('Example: node index.js contacts.csv');
             await client.destroy();
             process.exit(1);
         }
@@ -150,7 +141,9 @@ client.on('ready', async () => {
 
             if (cleanedNumber.length === 10) {
                 cleanedNumber = '91' + cleanedNumber; // Default country code: India (+91)
-            } else if (!(cleanedNumber.startsWith('91') && cleanedNumber.length === 12)) {
+            }
+
+            if (cleanedNumber.length < 11 || cleanedNumber.length > 15) {
                 console.log(`⚠️ Skipping invalid phone number "${rawPhone}" (normalized: "${cleanedNumber}")`);
                 continue;
             }
@@ -201,27 +194,53 @@ client.on('ready', async () => {
             process.exit(0);
         }
 
-        // Load message template from file or default
-        let templateText = DEFAULT_TEMPLATE;
-        const customTemplateFile = process.argv[3] || (fs.existsSync('./template.txt') ? './template.txt' : null);
-        if (customTemplateFile && fs.existsSync(customTemplateFile)) {
-            templateText = fs.readFileSync(customTemplateFile, 'utf-8');
-            console.log(`📝 Loaded custom template from "${customTemplateFile}"`);
-        } else {
-            console.log('📝 Using default message template');
+        // Step 1 Text: Intro Message
+        let introText = DEFAULT_INTRO;
+        const introFile = process.argv[3] || (fs.existsSync('./intro.txt') ? './intro.txt' : null);
+        if (introFile && fs.existsSync(introFile)) {
+            introText = fs.readFileSync(introFile, 'utf-8').trim();
+            console.log(`📝 Loaded Step 1 Intro Message from "${introFile}"`);
         }
 
-        // Optional PDF/Media attachment handling
-        let attachmentMedia = null;
+        // Step 2 Caption: PR Message
+        let prMessageText = DEFAULT_PR_MESSAGE;
+        const templateFile = process.argv[4] || (fs.existsSync('./template.txt') ? './template.txt' : null);
+        if (templateFile && fs.existsSync(templateFile)) {
+            prMessageText = fs.readFileSync(templateFile, 'utf-8').trim();
+            console.log(`📝 Loaded Step 2 PR Message Caption from "${templateFile}"`);
+        }
+
+        // Step 2 Image: Poster Image (poster.jpg, poster.png, BNB_Poster.jpg, etc.)
+        let posterMedia = null;
+        const posterCandidates = ['./poster.jpg', './poster.png', './poster.jpeg', './BNB_Poster.jpg', './BNB_Poster.png'];
+        const customPosterArg = process.argv[6];
+        let posterPath = customPosterArg;
+
+        if (!posterPath) {
+            for (const cand of posterCandidates) {
+                if (fs.existsSync(cand)) {
+                    posterPath = cand;
+                    break;
+                }
+            }
+        }
+
+        if (posterPath && fs.existsSync(posterPath)) {
+            posterMedia = MessageMedia.fromFilePath(posterPath);
+            console.log(`🖼️  Loaded Step 2 Poster Image: "${posterPath}"`);
+        }
+
+        // Step 3 Document: PDF Brochure
+        let pdfMedia = null;
         const defaultBnbPdf = './BNB_26_Maharashtra_Brochure.pdf';
-        const attachmentArg = process.argv[4] || (fs.existsSync(defaultBnbPdf) ? defaultBnbPdf : null);
-        if (attachmentArg && fs.existsSync(attachmentArg)) {
-            attachmentMedia = MessageMedia.fromFilePath(attachmentArg);
-            attachmentMedia.filename = "BNB'26 Maharashtra Brochure.pdf";
-            console.log(`📎 Loaded attachment file: "${attachmentArg}" (WhatsApp Display Title: "${attachmentMedia.filename}")`);
+        const pdfArg = process.argv[5] || (fs.existsSync(defaultBnbPdf) ? defaultBnbPdf : null);
+        if (pdfArg && fs.existsSync(pdfArg)) {
+            pdfMedia = MessageMedia.fromFilePath(pdfArg);
+            pdfMedia.filename = "BNB'26 Maharashtra Brochure.pdf";
+            console.log(`📎 Loaded Step 3 PDF Brochure: "${pdfArg}" (WhatsApp Display Title: "${pdfMedia.filename}")`);
         }
 
-        console.log('\n🚀 Starting message delivery...\n');
+        console.log(`\n🚀 Executing 3-Step Delivery Sequence for ${uniqueContacts.length} recipient(s):\n 1. Intro Message\n 2. Poster Image + Attached PR Caption\n 3. PDF Brochure Document\n`);
 
         // Loop and send messages with 5-contact batching & 30-40s pauses
         for (let i = 0; i < uniqueContacts.length; i++) {
@@ -235,23 +254,42 @@ client.on('ready', async () => {
                 if (!isRegistered) {
                     console.log(`❌ Number ${number} is not registered on WhatsApp. Skipping.`);
                 } else {
-                    // Replace {{name}} placeholder if present, else fallback cleanly
-                    let finalMessage = templateText;
-                    if (templateText.includes('{{name}}')) {
-                        finalMessage = templateText.replace(/\{\{name\}\}/g, name && name.length ? name : '');
+                    let finalIntro = introText;
+                    let finalPR = prMessageText;
+
+                    if (name && name.length) {
+                        finalIntro = finalIntro.replace(/\{\{name\}\}/g, name);
+                        finalPR = finalPR.replace(/\{\{name\}\}/g, name);
+                    } else {
+                        finalIntro = finalIntro.replace(/\{\{name\}\}/g, '');
+                        finalPR = finalPR.replace(/\{\{name\}\}/g, '');
                     }
 
-                    // Step 1: Send standalone intro text message
-                    console.log(`📤 Sending intro text message to ${number}...`);
-                    await client.sendMessage(chatId, finalMessage);
-                    console.log(`✅ Text message sent to ${number}`);
+                    // ── STEP 1: Send Standalone Intro Message ──────────────────────
+                    console.log(`📤 [Step 1/3] Sending Intro Text Message to ${number}...`);
+                    await client.sendMessage(chatId, finalIntro);
+                    console.log(`✅ Step 1: Intro Message sent to ${number}`);
 
-                    // Step 2: Send PDF attachment as separate message if provided
-                    if (attachmentMedia) {
-                        await delay(1500); // 1.5 second pause between text and PDF
-                        console.log(`📤 Sending PDF document (${attachmentMedia.filename}) to ${number}...`);
-                        await client.sendMessage(chatId, attachmentMedia, { sendMediaAsDocument: true });
-                        console.log(`✅ PDF document sent to ${number}`);
+                    await delay(1500); // 1.5s pause between Step 1 and Step 2
+
+                    // ── STEP 2: Send Poster Image + Attached PR Message Caption ───
+                    if (posterMedia) {
+                        console.log(`📤 [Step 2/3] Sending Poster Image with attached PR Caption...`);
+                        await client.sendMessage(chatId, posterMedia, { caption: finalPR });
+                        console.log(`✅ Step 2: Poster Image + PR Caption sent to ${number}`);
+                    } else {
+                        console.log(`📤 [Step 2/3] Sending PR Message Text...`);
+                        await client.sendMessage(chatId, finalPR);
+                        console.log(`✅ Step 2: PR Text sent to ${number}`);
+                    }
+
+                    await delay(1500); // 1.5s pause between Step 2 and Step 3
+
+                    // ── STEP 3: Send PDF Brochure Document ────────────────────────
+                    if (pdfMedia) {
+                        console.log(`📤 [Step 3/3] Sending PDF Brochure Document ("${pdfMedia.filename}")...`);
+                        await client.sendMessage(chatId, pdfMedia, { sendMediaAsDocument: true });
+                        console.log(`✅ Step 3: PDF Brochure Document sent to ${number}`);
                     }
 
                     // Log sent contact immediately to sent_log.json
@@ -268,7 +306,7 @@ client.on('ready', async () => {
 
             if (isBatchEnd && !isLastContact) {
                 const batchPause = Math.floor(Math.random() * (BATCH_PAUSE_MAX - BATCH_PAUSE_MIN + 1) + BATCH_PAUSE_MIN);
-                console.log(`\n⏸️  [Batch Completed] Sent ${BATCH_SIZE} messages. Pausing for ${(batchPause / 1000).toFixed(1)} seconds to prevent WhatsApp rate limits and allow message forwarding...\n`);
+                console.log(`\n⏸️  [Batch Completed] Sent ${BATCH_SIZE} contacts. Pausing for ${(batchPause / 1000).toFixed(1)} seconds to prevent WhatsApp rate limits and allow message forwarding...\n`);
                 await delay(batchPause);
             } else if (!isLastContact) {
                 const contactDelay = Math.floor(Math.random() * (PER_CONTACT_DELAY_MAX - PER_CONTACT_DELAY_MIN + 1) + PER_CONTACT_DELAY_MIN);

@@ -13,7 +13,7 @@ A robust, automated WhatsApp bulk messaging utility built using **Node.js** and 
 - 📲 **QR Code Terminal Auth**: Log in quickly by scanning a terminal QR code with WhatsApp's "Linked Devices".
 - 🔐 **Persistent Session Management**: Session data is cached locally via `LocalAuth` so you only scan the QR code once.
 - 📄 **Flexible CSV Contact Parsing**: Reads contacts directly from CSV files (`Year, Branch, First Name, Last Name, Phone` or standard `Name, Phone`).
-- 📝 **Dynamic Personalized Templates**: Replaces `{{name}}` placeholders with recipient names loaded from custom template files (`template.txt`).
+- 🖼️ **Poster Image & PDF Attachments**: Automatically sends event poster images (`poster.jpg` / `poster.png`) with the PR text message formatted as the caption, followed by the PDF brochure document as a separate attachment.
 - 🔄 **Smart Deduplication & Logging**: Automatically records sent messages in `sent_log.json` to prevent sending duplicate messages if re-run.
 - 🛡️ **Anti-Spam Batching & Rate Limiting**: Sends messages in batches of 5 contacts with 2–5s random delays between individual messages, followed by a **30–40 second pause** between batches. This prevents WhatsApp automated spam detection and gives you time to manually forward media or follow-up details.
 - 💻 **Cross-Platform**: Operates out-of-the-box on Linux, macOS, and Windows.
@@ -24,10 +24,12 @@ A robust, automated WhatsApp bulk messaging utility built using **Node.js** and 
 
 ```
 whatsapp-pr-messaging/
-├── index.js                          # Main bulk messaging script
-├── test_send.js                      # Dedicated test script for message + PDF sending
-├── BNB_26_Maharashtra_Brochure.pdf   # Official BNB '26 Maharashtra Event Brochure
-├── template.txt                      # BNB PR broadcast message template
+├── index.js                          # Main bulk messaging script (3-step sequence)
+├── test_send.js                      # Dedicated test script for 3-step sequence
+├── intro.txt                         # Step 1: Intro message text
+├── poster.jpg                        # Step 2: Event poster image
+├── template.txt                      # Step 2: PR message text (attached as caption to poster.jpg)
+├── BNB_26_Maharashtra_Brochure.pdf   # Step 3: Official BNB '26 Maharashtra Event Brochure
 ├── contacts_sample.csv               # Sample 1-column CSV phone number file
 ├── check_availability.js             # Specialized utility for targeted availability checks
 ├── package.json                      # NPM configuration and scripts

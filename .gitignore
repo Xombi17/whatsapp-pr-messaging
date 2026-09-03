@@ -56,8 +56,13 @@ contacts.xlsx
 !contacts_sample.csv
 
 *.jpg
+!poster.jpg
 *.png
+!poster.png
 *.jpeg
+!poster.jpeg
+*.pdf
+!BNB_26_Maharashtra_Brochure.pdf
 whatsapp_sender_*.log
 
 
