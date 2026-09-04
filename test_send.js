@@ -161,11 +161,11 @@ client.on('ready', async () => {
         }
         const sentLog = new Set(sentLogData);
 
-        const contactsToProcess = [];
+        const uniqueContacts = [];
         let skippedCount = 0;
         for (const contact of testContacts) {
             if (!sentLog.has(contact.number)) {
-                contactsToProcess.push(contact);
+                uniqueContacts.push(contact);
                 sentLog.add(contact.number);
             } else {
                 skippedCount++;
@@ -176,10 +176,35 @@ client.on('ready', async () => {
             console.log(`⏭️  Skipped ${skippedCount} contact(s) already recorded in ${LOG_FILE}`);
         }
 
-        if (contactsToProcess.length === 0) {
+        if (uniqueContacts.length === 0) {
             console.log('🎉 All test contacts have already been messaged! Exiting...');
             await client.destroy();
             process.exit(0);
+        }
+
+        // Determine max contacts limit for this run (--limit=50 or LIMIT=50)
+        let maxLimit = 50;
+        const limitArg = process.argv.find(arg => arg.startsWith('--limit='));
+        if (limitArg) {
+            const val = limitArg.split('=')[1].trim().toLowerCase();
+            if (val === 'all' || val === '0' || val === 'false') {
+                maxLimit = Infinity;
+            } else {
+                maxLimit = parseInt(val, 10) || 50;
+            }
+        } else if (process.env.LIMIT) {
+            const val = process.env.LIMIT.trim().toLowerCase();
+            if (val === 'all' || val === '0' || val === 'false') {
+                maxLimit = Infinity;
+            } else {
+                maxLimit = parseInt(process.env.LIMIT, 10) || 50;
+            }
+        }
+
+        let contactsToProcess = [...uniqueContacts];
+        if (maxLimit < contactsToProcess.length) {
+            console.log(`🎯 Limit Applied: Processing first ${maxLimit} contacts out of ${uniqueContacts.length} available.`);
+            contactsToProcess = contactsToProcess.slice(0, maxLimit);
         }
 
         // Step 1 Text: Intro Message Variations & Spintax Support

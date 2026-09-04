@@ -228,14 +228,42 @@ client.on('ready', async () => {
         if (skippedCount > 0) {
             console.log(`⏭️  Already Messaged Previously: ${skippedCount} (Skipped automatically)`);
         }
-        console.log(`✉️  New Numbers to Message: ${uniqueContacts.length}`);
-        console.log(`⚙️  Batch Configuration: ${BATCH_SIZE} contacts/batch, 2-5s contact delay, 30-40s batch pause\n`);
+        console.log(`✉️  New Unmessaged Contacts Remaining: ${uniqueContacts.length}`);
 
         if (uniqueContacts.length === 0) {
             console.log('🎉 All contacts have already been messaged! Exiting...');
             await client.destroy();
             process.exit(0);
         }
+
+        // Determine max contacts limit for this run (--limit=50 or LIMIT=50)
+        let maxLimit = 50; // Default limit per run
+        const limitArg = process.argv.find(arg => arg.startsWith('--limit='));
+        if (limitArg) {
+            const val = limitArg.split('=')[1].trim().toLowerCase();
+            if (val === 'all' || val === '0' || val === 'false') {
+                maxLimit = Infinity;
+            } else {
+                maxLimit = parseInt(val, 10) || 50;
+            }
+        } else if (process.env.LIMIT) {
+            const val = process.env.LIMIT.trim().toLowerCase();
+            if (val === 'all' || val === '0' || val === 'false') {
+                maxLimit = Infinity;
+            } else {
+                maxLimit = parseInt(process.env.LIMIT, 10) || 50;
+            }
+        }
+
+        let contactsToProcess = [...uniqueContacts];
+        if (maxLimit < contactsToProcess.length) {
+            console.log(`🎯 Limit Applied: Processing first ${maxLimit} contacts out of ${uniqueContacts.length} available for this run.`);
+            contactsToProcess = contactsToProcess.slice(0, maxLimit);
+        } else {
+            console.log(`🎯 Limit: Processing all ${contactsToProcess.length} contact(s) for this run.`);
+        }
+
+        console.log(`⚙️  Batch Configuration: ${BATCH_SIZE} contacts/batch, 2-5s contact delay, 30-40s batch pause\n`);
 
         // Step 1 Text: Intro Message Variations & Spintax Support
         let introVariations = [];
@@ -333,14 +361,14 @@ client.on('ready', async () => {
             console.log(`📎 Loaded Step 3 PDF Brochure: "${pdfArg}" (WhatsApp Display Title: "${pdfMedia.filename}")`);
         }
 
-        console.log(`\n🚀 Executing 3-Step Delivery Sequence for ${uniqueContacts.length} recipient(s):\n 1. Intro Message\n 2. Poster Image + Attached PR Caption\n 3. PDF Brochure Document\n`);
+        console.log(`\n🚀 Executing 3-Step Delivery Sequence for ${contactsToProcess.length} recipient(s):\n 1. Intro Message\n 2. Poster Image + Attached PR Caption\n 3. PDF Brochure Document\n`);
 
         // Loop and send messages with 5-contact batching & 30-40s pauses
-        for (let i = 0; i < uniqueContacts.length; i++) {
-            const { number, name } = uniqueContacts[i];
+        for (let i = 0; i < contactsToProcess.length; i++) {
+            const { number, name } = contactsToProcess[i];
             const chatId = `${number}@c.us`;
 
-            console.log(`[${i + 1}/${uniqueContacts.length}] Processing number (${number})...`);
+            console.log(`[${i + 1}/${contactsToProcess.length}] Processing number (${number})...`);
 
             try {
                 const isRegistered = await client.isRegisteredUser(chatId);
@@ -400,7 +428,7 @@ client.on('ready', async () => {
 
             // Check if we reached the end of a 5-contact batch (and not at the very last contact)
             const isBatchEnd = (i + 1) % BATCH_SIZE === 0;
-            const isLastContact = (i === uniqueContacts.length - 1);
+            const isLastContact = (i === contactsToProcess.length - 1);
 
             if (isBatchEnd && !isLastContact) {
                 const batchPause = Math.floor(Math.random() * (BATCH_PAUSE_MAX - BATCH_PAUSE_MIN + 1) + BATCH_PAUSE_MIN);
