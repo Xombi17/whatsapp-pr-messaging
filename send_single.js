@@ -1,0 +1,359 @@
+const fs = require('fs');
+const path = require('path');
+const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
+const qrcode = require('qrcode-terminal');
+const { parse } = require('csv-parse/sync');
+
+// Log file to track sent messages and avoid duplicates across runs
+const LOG_FILE = './sent_log.json';
+
+// Rate Limiting & Batching Configuration (Ultra-Safe Single Delivery Settings)
+const BATCH_SIZE = 5;                   // Process 5 contacts per batch
+const PER_CONTACT_DELAY_MIN = 12000;     // 12 seconds minimum delay between individual contacts
+const PER_CONTACT_DELAY_MAX = 20000;     // 20 seconds maximum delay between individual contacts
+const BATCH_PAUSE_MIN = 60000;           // 60 seconds (1 minute) minimum pause after every 5 contacts
+const BATCH_PAUSE_MAX = 90000;           // 90 seconds (1.5 minutes) maximum pause after every 5 contacts
+
+// Utility helper for async delays (human-like pacing)
+const delay = ms => new Promise(res => setTimeout(res, ms));
+
+/**
+ * Utility helper for Spintax resolution.
+ * Replaces patterns like "{Announcing|Presenting}" with a randomly selected choice per message.
+ */
+function applySpintax(text) {
+    if (!text) return '';
+    return text.replace(/\{([^{}]+)\}/g, (match, choices) => {
+        const options = choices.split('|');
+        return options[Math.floor(Math.random() * options.length)].trim();
+    });
+}
+
+/**
+ * Configure Puppeteer launch options cross-platform (Windows, macOS, Linux).
+ */
+function getPuppeteerOptions() {
+    const options = {
+        args: [
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            '--disable-dev-shm-usage',
+            '--disable-accelerated-2d-canvas',
+            '--no-first-run',
+            '--no-zygote',
+            '--disable-gpu'
+        ]
+    };
+
+    if (process.env.PUPPETEER_EXECUTABLE_PATH) {
+        options.executablePath = process.env.PUPPETEER_EXECUTABLE_PATH;
+    } else if (process.platform === 'linux' && fs.existsSync('/opt/google/chrome/google-chrome')) {
+        options.executablePath = '/opt/google/chrome/google-chrome';
+    } else if (process.platform === 'darwin' && fs.existsSync('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome')) {
+        options.executablePath = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+    } else if (process.platform === 'win32') {
+        const winChrome64 = 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
+        const winChrome32 = 'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe';
+        if (fs.existsSync(winChrome64)) {
+            options.executablePath = winChrome64;
+        } else if (fs.existsSync(winChrome32)) {
+            options.executablePath = winChrome32;
+        }
+    }
+
+    return options;
+}
+
+// Initialize WhatsApp Web Client with LocalAuth
+const client = new Client({
+    authStrategy: new LocalAuth(),
+    puppeteer: getPuppeteerOptions()
+});
+
+// Display QR code in the terminal when authentication is needed
+client.on('qr', (qr) => {
+    qrcode.generate(qr, { small: true });
+    console.log('\n📲 QR Code generated! Scan it using WhatsApp on your phone (Linked Devices).\n');
+});
+
+// Event triggered once WhatsApp Web authentication succeeds
+client.on('ready', async () => {
+    console.log('\n✅ [SINGLE MESSENGER] WhatsApp Client authenticated and ready!');
+
+    try {
+        // Determine input CSV file path
+        const csvFile = process.argv[2] || (fs.existsSync('./contacts.csv') ? './contacts.csv' : null);
+
+        if (!csvFile) {
+            console.error('❌ Error: No CSV file provided!');
+            console.log('Usage: node send_single.js <contacts.csv> [template.txt] [poster.jpg] [--limit=50]');
+            console.log('Example: node send_single.js contacts.csv --limit=20');
+            await client.destroy();
+            process.exit(1);
+        }
+
+        if (!fs.existsSync(csvFile)) {
+            console.error(`❌ Error: CSV file "${csvFile}" not found.`);
+            await client.destroy();
+            process.exit(1);
+        }
+
+        console.log(`📂 Reading contact numbers from "${csvFile}"...`);
+        const csvText = fs.readFileSync(csvFile, 'utf-8');
+        const records = parse(csvText, { skip_empty_lines: true, relax_column_count: true });
+
+        if (records.length === 0) {
+            console.log('⚠️ CSV file is empty. Nothing to process.');
+            await client.destroy();
+            process.exit(0);
+        }
+
+        // Determine column indexes dynamically across first few rows for 1-column / multi-column CSVs
+        let phoneIndex = 0;
+        let nameIndex = -1;
+        let startIndex = 0;
+
+        for (let r = 0; r < Math.min(5, records.length); r++) {
+            const rowStr = records[r].map(cell => (cell || '').toString().trim().toLowerCase());
+            const detectedPhoneIdx = rowStr.findIndex(h => h.includes('phone') || h.includes('number') || h.includes('mobile'));
+            const detectedNameIdx = rowStr.findIndex(h => h.includes('name') || h.includes('first'));
+
+            if (detectedPhoneIdx !== -1) {
+                phoneIndex = detectedPhoneIdx;
+                if (detectedNameIdx !== -1 && detectedNameIdx !== phoneIndex) nameIndex = detectedNameIdx;
+                startIndex = r + 1; // Skip up to this header row
+            }
+        }
+
+        const allContacts = [];
+        for (let i = startIndex; i < records.length; i++) {
+            const row = records[i];
+            let rawPhone = '';
+            let rawName = '';
+
+            if (row.length === 1) {
+                rawPhone = (row[0] || '').toString().trim();
+            } else {
+                rawPhone = (row[phoneIndex] || row[0] || '').toString().trim();
+                if (nameIndex !== -1 && row[nameIndex]) {
+                    rawName = row[nameIndex].toString().trim();
+                }
+            }
+
+            if (!rawPhone || rawPhone.toLowerCase() === 'phone' || rawPhone.toLowerCase() === 'number') continue;
+
+            // Normalize phone number into E.164 format without '+' prefix (e.g. 91XXXXXXXXXX)
+            let cleanedNumber = rawPhone.replace(/\D/g, '');
+
+            if (cleanedNumber.length === 10) {
+                cleanedNumber = '91' + cleanedNumber; // Default country code: India (+91)
+            }
+
+            if (cleanedNumber.length < 11 || cleanedNumber.length > 15) {
+                console.log(`⚠️ Skipping invalid phone number "${rawPhone}" (normalized: "${cleanedNumber}")`);
+                continue;
+            }
+
+            allContacts.push({
+                number: cleanedNumber,
+                name: rawName
+            });
+        }
+
+        // Initialize or load sent_log.json to prevent duplicate sends
+        let sentLogData = [];
+        if (fs.existsSync(LOG_FILE)) {
+            try {
+                sentLogData = JSON.parse(fs.readFileSync(LOG_FILE, 'utf-8'));
+            } catch (e) {
+                sentLogData = [];
+            }
+        } else {
+            fs.writeFileSync(LOG_FILE, JSON.stringify([], null, 2));
+            console.log(`📄 Created log file "${LOG_FILE}" to track sent contacts.`);
+        }
+        const sentLog = new Set(sentLogData);
+
+        // Filter out contacts that were already messaged in previous runs
+        const uniqueContacts = [];
+        let skippedCount = 0;
+        for (const contact of allContacts) {
+            if (!sentLog.has(contact.number)) {
+                uniqueContacts.push(contact);
+                sentLog.add(contact.number); // Prevent intra-CSV duplicates
+            } else {
+                skippedCount++;
+            }
+        }
+
+        console.log(`📊 Total Valid Phone Numbers: ${allContacts.length}`);
+        if (skippedCount > 0) {
+            console.log(`⏭️  Already Messaged Previously: ${skippedCount} (Skipped automatically)`);
+        }
+        console.log(`✉️  New Unmessaged Contacts Remaining: ${uniqueContacts.length}`);
+
+        if (uniqueContacts.length === 0) {
+            console.log('🎉 All contacts have already been messaged! Exiting...');
+            await client.destroy();
+            process.exit(0);
+        }
+
+        // Determine max contacts limit for this run (--limit=50 or LIMIT=50)
+        let maxLimit = 50; // Default limit per run
+        const limitArg = process.argv.find(arg => arg.startsWith('--limit='));
+        if (limitArg) {
+            const val = limitArg.split('=')[1].trim().toLowerCase();
+            if (val === 'all' || val === '0' || val === 'false') {
+                maxLimit = Infinity;
+            } else {
+                maxLimit = parseInt(val, 10) || 50;
+            }
+        } else if (process.env.LIMIT) {
+            const val = process.env.LIMIT.trim().toLowerCase();
+            if (val === 'all' || val === '0' || val === 'false') {
+                maxLimit = Infinity;
+            } else {
+                maxLimit = parseInt(process.env.LIMIT, 10) || 50;
+            }
+        }
+
+        let contactsToProcess = [...uniqueContacts];
+        if (maxLimit < contactsToProcess.length) {
+            console.log(`🎯 Limit Applied: Processing first ${maxLimit} contacts out of ${uniqueContacts.length} available for this run.`);
+            contactsToProcess = contactsToProcess.slice(0, maxLimit);
+        } else {
+            console.log(`🎯 Limit: Processing all ${contactsToProcess.length} contact(s) for this run.`);
+        }
+
+        // Step 2 Caption: PR Message Variations & Spintax Support
+        let prVariations = [];
+        const templateFile = process.argv[3] || (fs.existsSync('./template.txt') ? './template.txt' : null);
+
+        if (templateFile && fs.existsSync(templateFile)) {
+            const rawTemplate = fs.readFileSync(templateFile, 'utf-8').trim();
+            if (rawTemplate.includes('---')) {
+                prVariations = rawTemplate.split('---').map(s => s.trim()).filter(Boolean);
+                console.log(`📝 Loaded ${prVariations.length} PR Message variations from "${templateFile}" (separated by '---')`);
+            } else {
+                prVariations.push(rawTemplate);
+                console.log(`📝 Loaded PR Message Caption from "${templateFile}"`);
+            }
+        }
+
+        // Check for standalone template files (template1.txt, template2.txt, template3.txt)
+        const standaloneTemplateFiles = ['./template1.txt', './template2.txt', './template3.txt', './template_1.txt', './template_2.txt', './template_3.txt'];
+        for (const file of standaloneTemplateFiles) {
+            if (fs.existsSync(file)) {
+                const content = fs.readFileSync(file, 'utf-8').trim();
+                if (content && !prVariations.includes(content)) {
+                    prVariations.push(content);
+                    console.log(`📝 Loaded additional PR Message variation from "${file}"`);
+                }
+            }
+        }
+
+        if (prVariations.length === 0) {
+            console.error('❌ Error: No template message found in template.txt');
+            await client.destroy();
+            process.exit(1);
+        }
+
+        console.log(`ℹ️  Total active PR Message variations: ${prVariations.length}`);
+
+        // Step 2 Image: Poster Image (poster.jpg, poster.png, BNB_Poster.jpg, etc.)
+        let posterMedia = null;
+        const posterCandidates = ['./poster.jpg', './poster.png', './poster.jpeg', './BNB_Poster.jpg', './BNB_Poster.png'];
+        const customPosterArg = process.argv[4];
+        let posterPath = customPosterArg;
+
+        if (!posterPath) {
+            for (const cand of posterCandidates) {
+                if (fs.existsSync(cand)) {
+                    posterPath = cand;
+                    break;
+                }
+            }
+        }
+
+        if (posterPath && fs.existsSync(posterPath)) {
+            posterMedia = MessageMedia.fromFilePath(posterPath);
+            console.log(`🖼️  Loaded Poster Image: "${posterPath}"`);
+        }
+
+        console.log(`\n🚀 Executing SINGLE-STEP Delivery (Poster Image + Attached PR Caption) for ${contactsToProcess.length} recipient(s)\n`);
+        console.log(`⚙️  Batch Configuration: ${BATCH_SIZE} contacts/batch, 12-20s contact delay, 60-90s batch pause\n`);
+
+        // Loop and send 1 single message per contact
+        for (let i = 0; i < contactsToProcess.length; i++) {
+            const { number, name } = contactsToProcess[i];
+            const chatId = `${number}@c.us`;
+
+            console.log(`[${i + 1}/${contactsToProcess.length}] Processing number (${number})...`);
+
+            try {
+                const isRegistered = await client.isRegisteredUser(chatId);
+                if (!isRegistered) {
+                    console.log(`❌ Number ${number} is not registered on WhatsApp. Logging and skipping.`);
+                    sentLogData.push(number);
+                    fs.writeFileSync(LOG_FILE, JSON.stringify(sentLogData, null, 2));
+                } else {
+                    // Rotate through available PR template variations
+                    const rawPR = prVariations[i % prVariations.length];
+                    let finalPR = rawPR;
+
+                    // Clean up any residual {{name}} placeholder safely
+                    finalPR = finalPR.replace(/\{\{name\}\}\s*/g, '');
+
+                    // Apply Spintax resolution (e.g. "{Announcing|Presenting}")
+                    finalPR = applySpintax(finalPR);
+
+                    // ── SINGLE STEP: Send Poster Image with Attached PR Message Caption ───
+                    if (posterMedia) {
+                        console.log(`📤 Sending Poster Image with attached PR Caption to ${number}...`);
+                        await client.sendMessage(chatId, posterMedia, { caption: finalPR });
+                        console.log(`✅ SUCCESS: Poster Image + PR Caption sent to ${number}`);
+                    } else {
+                        console.log(`📤 Sending PR Message Text to ${number}...`);
+                        await client.sendMessage(chatId, finalPR);
+                        console.log(`✅ SUCCESS: PR Text sent to ${number}`);
+                    }
+
+                    // Log sent contact immediately to sent_log.json
+                    sentLogData.push(number);
+                    fs.writeFileSync(LOG_FILE, JSON.stringify(sentLogData, null, 2));
+                }
+            } catch (err) {
+                console.error(`❌ Failed to send to ${number}:`, err.message);
+            }
+
+            // Check if we reached the end of a 5-contact batch (and not at the very last contact)
+            const isBatchEnd = (i + 1) % BATCH_SIZE === 0;
+            const isLastContact = (i === contactsToProcess.length - 1);
+
+            if (isBatchEnd && !isLastContact) {
+                const batchPause = Math.floor(Math.random() * (BATCH_PAUSE_MAX - BATCH_PAUSE_MIN + 1) + BATCH_PAUSE_MIN);
+                console.log(`\n⏸️  [Batch Completed] Sent ${BATCH_SIZE} contacts. Pausing for ${(batchPause / 1000).toFixed(1)} seconds to prevent WhatsApp rate limits...\n`);
+                await delay(batchPause);
+            } else if (!isLastContact) {
+                const contactDelay = Math.floor(Math.random() * (PER_CONTACT_DELAY_MAX - PER_CONTACT_DELAY_MIN + 1) + PER_CONTACT_DELAY_MIN);
+                console.log(`⏳ Waiting ${(contactDelay / 1000).toFixed(1)}s before next contact...`);
+                await delay(contactDelay);
+            }
+        }
+
+        console.log('⏳ Waiting 8 seconds to allow WhatsApp network sync to finish...');
+        await delay(8000);
+
+        console.log('\n🎉 Single-step bulk message delivery completed successfully!');
+        await client.destroy();
+        process.exit(0);
+
+    } catch (error) {
+        console.error('❌ An unexpected error occurred during execution:', error);
+        if (client) await client.destroy();
+        process.exit(1);
+    }
+});
+
+// Start WhatsApp Client initialization
+client.initialize();
