@@ -4,7 +4,7 @@
 [![whatsapp-web.js](https://img.shields.io/badge/whatsapp--web.js-v1.34.6-brightgreen.svg)](https://wwebjs.dev/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-A robust, automated WhatsApp bulk messaging utility built using **Node.js** and **`whatsapp-web.js`**. Designed for student organizations, teams, and committees (e.g., GDSC) to automate event announcements, interview invitations, and member updates reliably.
+A robust, automated WhatsApp bulk messaging utility built using **Node.js** and **`whatsapp-web.js`**. Designed for student organizations, teams, and committees (e.g., GDSC) to automate event announcements, interview invitations, and member updates reliably while maintaining strict anti-spam protections.
 
 ---
 
@@ -12,10 +12,13 @@ A robust, automated WhatsApp bulk messaging utility built using **Node.js** and 
 
 - 📲 **QR Code Terminal Auth**: Log in quickly by scanning a terminal QR code with WhatsApp's "Linked Devices".
 - 🔐 **Persistent Session Management**: Session data is cached locally via `LocalAuth` so you only scan the QR code once.
-- 📄 **Flexible CSV Contact Parsing**: Reads contacts directly from CSV files (`Year, Branch, First Name, Last Name, Phone` or standard `Name, Phone`).
-- 🖼️ **Poster Image & PDF Attachments**: Automatically sends event poster images (`poster.jpg` / `poster.png`) with the PR text message formatted as the caption, followed by the PDF brochure document as a separate attachment.
-- 🔄 **Smart Deduplication & Logging**: Automatically records sent messages in `sent_log.json` to prevent sending duplicate messages if re-run.
-- 🛡️ **Anti-Spam Batching & Rate Limiting**: Sends messages in batches of 5 contacts with 2–5s random delays between individual messages, followed by a **30–40 second pause** between batches. This prevents WhatsApp automated spam detection and gives you time to manually forward media or follow-up details.
+- 📄 **Robust CSV Contact Parsing**: Reads contacts directly from CSV files with flexible multi-row headers and column count tolerance.
+- 🔀 **Spintax & Text Variation Engine**: Supports `{Hey|Hi|Hello}` spintax in both `intro.txt` and `template.txt` to generate unique variations per contact and evade automated spam fingerprinting.
+- 🔄 **Multi-Template & Intro Rotation**: Rotates through multiple message variations separated by `---` or loaded from `intro1.txt`/`template1.txt`.
+- 🎯 **Per-Run Batch Limiting (`--limit=N`)**: Safely cap sending volume (default 50 contacts per run, customizable via `--limit=20`, `--limit=100`, or `--limit=all`).
+- 🖼️ **Optimized Media Delivery**: Automatically attaches poster images (`poster.jpg`) and lightened PDF brochures (`BNB_26_Maharashtra_Brochure.pdf`, ~3.6 MB compressed) without crashing Puppeteer memory.
+- 📝 **Smart Logging & Unregistered Number Caching**: Records sent and unregistered numbers immediately in `sent_log.json` to prevent duplicate messaging and redundant network checks.
+- 🛡️ **Anti-Spam Batching & Rate Limiting**: Sends messages in batches of 5 contacts with random delays between individual contacts and mandatory pauses between batches.
 - 💻 **Cross-Platform**: Operates out-of-the-box on Linux, macOS, and Windows.
 
 ---
@@ -24,21 +27,17 @@ A robust, automated WhatsApp bulk messaging utility built using **Node.js** and 
 
 ```
 whatsapp-pr-messaging/
-├── index.js                          # Main bulk messaging script (3-step sequence)
+├── index.js                          # Main bulk messaging script with batching & limits
 ├── test_send.js                      # Dedicated test script for 3-step sequence
-├── intro.txt                         # Step 1: Intro message text
+├── intro.txt                         # Step 1: Intro message text (supports '---' variations & spintax)
+├── template.txt                      # Step 2: PR message caption (supports '---' variations & spintax)
 ├── poster.jpg                        # Step 2: Event poster image
-├── template.txt                      # Step 2: PR message text (attached as caption to poster.jpg)
-├── BNB_26_Maharashtra_Brochure.pdf   # Step 3: Official BNB '26 Maharashtra Event Brochure
-├── contacts_sample.csv               # Sample 1-column CSV phone number file
-├── check_availability.js             # Specialized utility for targeted availability checks
+├── BNB_26_Maharashtra_Brochure.pdf   # Step 3: Official compressed BNB '26 Event Brochure (3.6 MB)
+├── contacts_sample.csv               # Sample CSV phone number file
 ├── package.json                      # NPM configuration and scripts
-├── .gitignore                        # Excludes session data, logs, and node_modules
-├── archive/                          # Legacy Python/Selenium scripts and old logs
-└── README.md                         # Complete documentation
+├── .gitignore                        # Excludes session data, contacts.csv, sent_log.json
+└── README.md                         # Project documentation
 ```
-
-> **Note**: Upon first run, `.wwebjs_auth/` (session storage) and `sent_log.json` (delivery history) will be created automatically. These are git-ignored to protect privacy and session security.
 
 ---
 
@@ -50,9 +49,7 @@ whatsapp-pr-messaging/
 - **Google Chrome** or **Chromium** browser installed on your machine
 - A WhatsApp account on your mobile phone
 
-### 1. Clone & Install
-
-Clone this repository and install the dependencies:
+### 1. Install Dependencies
 
 ```bash
 git clone https://github.com/Xombi17/whatsapp-pr-messaging.git
@@ -62,127 +59,90 @@ npm install
 
 ---
 
-## 📖 Step-by-Step Usage Guide
+## 📖 Usage & Features Guide
 
-### Step 1: Prepare your Contacts CSV File
+### Step 1: Prepare Contacts (`contacts.csv`)
 
-Create a CSV file (e.g., `contacts.csv` or copy `contacts_sample.csv`). You can provide a simple single-column list of phone numbers (no names required):
+Create `contacts.csv` (or use `contacts_sample.csv`). Single-column or multi-column formats are both supported:
 
-**Simple Phone-Only CSV Format (`contacts.csv`):**
 ```csv
 Phone
 9876543210
 919876543211
 ```
 
-*(Note: Multi-column CSVs containing `Name` and `Phone` columns are also automatically supported).*
-
-* **Phone Number Formatting**: Phone numbers can be 10 digits (e.g., `9876543210` — Indian numbers will automatically receive `91` country code prefix) or full E.164 without `+` (e.g., `919876543211`).
+* **Phone Number Normalization**: 10-digit Indian numbers automatically receive the `91` country code.
 
 ---
 
-### Step 2: Customize Your Message Template
+### Step 2: Set Up Spintax & Multi-Text Variations
 
-Edit `template.txt` or create a custom text file. Use the `{{name}}` placeholder where you want recipient names injected.
+To prevent WhatsApp from flagging identical text across hundreds of contacts, add **Spintax** and **multi-intro variations** in `intro.txt` and `template.txt`.
 
-**Example `template.txt`:**
+#### Example `intro.txt` (3 Rotated Variations with Spintax):
 ```text
-Hi {{name}},
+{Hey|Hi|Hello}! This is Varad from GDG CRCE. We saw that you are part of active tech/hackathon communities. We are {excited|thrilled} to announce BIT N BUILD '26!
+---
+{Greetings|Hello|Hey there}! Hope you are doing well. Varad Joshi here from GDG CRCE. We are officially opening registrations for BIT N BUILD '26.
+---
+{Hi|Hey there}! Varad here from GDSC/GDG CRCE. Reaching out with an exciting opportunity for BIT N BUILD '26!
+```
 
-This is Varad from GDSC CRCE!
+#### Example `template.txt` (PR Caption with Spintax):
+```text
+*{The|Our}* _Ultimate Stage_ *to compete against IITs, NITs, and premier global institutions* 🌍
 
-We have received your application for the Junior Council 2026-27, and we are excited to invite you for the interview round.
-
-Kindly let us know your availability so that we can schedule your interview slot.
-
-We look forward to seeing your best! 😊
-
-Regards,
-Team GDSC CRCE
+{Announcing|Presenting|Introducing} *Bit N Build '26*, the flagship International Hackathon presented by *Google Developer Groups (GDG)* at Fr. CRCE, Mumbai.
+...
 ```
 
 ---
 
-### Step 3: Run the Bulk Messenger
+### Step 3: Run the Messenger
 
-Execute the messenger script using Node.js:
+Execute the main script:
 
 ```bash
-# 1. Text-Only Mode (uses default contacts.csv and template.txt)
+# 1. Standard Run (Processes first 50 unmessaged contacts by default)
 npm start
 
-# 2. Custom CSV & Template File
-node index.js contacts.csv template.txt
+# 2. Specify Custom Contact Limit (e.g. 20 contacts)
+node index.js contacts.csv --limit=20
 
-### Testing PDF + Intro Message Sending
+# 3. Process ALL Remaining Contacts (No Limit)
+node index.js contacts.csv --limit=all
 
-A dedicated test script [test_send.js](file:///home/varad/Documents/gdsc/whatsapp-pr-messaging/test_send.js) is provided for test runs:
+# 4. Custom Limit via Environment Variable
+LIMIT=30 npm start
+```
+
+### Testing (`test_send.js`)
+
+Run a test batch using test contacts:
 
 ```bash
-# Run test script with BNB brochure and test contacts
 npm test
-
-# Or specify custom test contacts, template, and PDF:
-node test_send.js test_contacts.csv template.txt BNB_26_Maharashtra_Brochure.pdf
+# Or with custom limit:
+node test_send.js test_contacts.csv --limit=5
 ```
 
 ---
 
 ### Step 4: Scan the QR Code
 
-1. When you start the script for the first time, a **QR Code** will render directly in your terminal.
-2. Open **WhatsApp** on your mobile phone.
-3. Go to **Settings / Menu** > **Linked Devices** > **Link a Device**.
-4. Scan the terminal QR Code.
-5. Once authenticated, the script will process the contacts automatically!
+1. On first launch, a **QR Code** will render in your terminal.
+2. Open **WhatsApp** on your phone > **Settings / Menu** > **Linked Devices** > **Link a Device**.
+3. Scan the terminal QR code.
+4. Session data will save automatically to `.wwebjs_auth/` for future runs.
 
 ---
 
-## 🛠️ Additional Tools & Scripts
+## 🛡️ Anti-Ban Best Practices
 
-### Availability Check Utility
-
-If you need to send follow-ups or check availability for specific candidates, use `check_availability.js`:
-
-```bash
-# Run availability check script
-npm run check-availability
-
-# Run in test mode (sends a single test message)
-node check_availability.js --test
-```
-
-### Custom Chrome Executable Path
-
-If Puppeteer fails to find your local Google Chrome binary, set the `PUPPETEER_EXECUTABLE_PATH` environment variable:
-
-```bash
-# Linux
-export PUPPETEER_EXECUTABLE_PATH=/usr/bin/google-chrome
-
-# Windows (PowerShell)
-$env:PUPPETEER_EXECUTABLE_PATH="C:\Program Files\Google\Chrome\Application\chrome.exe"
-```
-
----
-
-## 🛡️ Best Practices & Responsible Use
-
-1. **Avoid Spamming**: Only message contacts who have opted in or applied for your program/event.
-2. **Start Small**: Test your messaging flow with a small CSV file (2–3 test numbers) before running large broadcasts.
-3. **Respect Delays**: The script includes a 2–5 second random wait between messages. Do not remove this delay, as sending messages too quickly can result in temporary WhatsApp suspensions.
-4. **Session Reset**: If you need to switch WhatsApp accounts, delete the `.wwebjs_auth/` folder and re-run the script to scan a new QR code.
-
----
-
-## ❓ Troubleshooting
-
-| Issue | Cause | Solution |
-| :--- | :--- | :--- |
-| `Error: Cannot find module` | Missing node dependencies | Run `npm install` in the project directory. |
-| Chrome fails to launch | Browser path mismatch | Install Google Chrome or set `PUPPETEER_EXECUTABLE_PATH`. |
-| `Number is not registered` | Invalid phone number | Check CSV phone format. The script safely skips unregistered numbers. |
-| QR Code repeats endlessly | Disconnected session | Clear `.wwebjs_auth/` folder and re-scan the QR code. |
+1. **Daily Volume Limits**: Send in small batches (30–50 contacts per run) using `--limit=50`.
+2. **Use Spintax**: Keep `{option1|option2}` syntax in `intro.txt` and `template.txt` so every recipient gets a unique message.
+3. **Respect Rate Limits**: Keep batch pauses enabled (30–40s after every 5 contacts).
+4. **Lightweight Attachments**: Ensure PDFs remain compressed (<5 MB) to avoid browser socket timeouts.
 
 ---
 
@@ -192,4 +152,4 @@ Distributed under the MIT License. See `LICENSE` for details.
 
 ---
 
-**Crafted with ❤️ for GDSC CRCE & Community Leaders**
+**Crafted with ❤️ for GDG CRCE & Community Leaders**

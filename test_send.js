@@ -93,7 +93,7 @@ client.on('ready', async () => {
         // 2. Load Contacts from CSV
         console.log(`📂 Loading test contacts from "${csvFile}"...`);
         const csvText = fs.readFileSync(csvFile, 'utf-8');
-        const records = parse(csvText, { skip_empty_lines: true });
+        const records = parse(csvText, { skip_empty_lines: true, relax_column_count: true });
 
         if (records.length === 0) {
             console.log('⚠️ CSV file is empty. Nothing to test.');
@@ -101,22 +101,21 @@ client.on('ready', async () => {
             process.exit(0);
         }
 
-        // Detect columns
+        // Detect columns across first few rows
         let nameIndex = -1;
         let phoneIndex = 0;
         let startIndex = 0;
 
-        const firstRow = records[0].map(cell => (cell || '').toString().trim().toLowerCase());
-        const detectedPhoneIdx = firstRow.findIndex(h => h.includes('phone') || h.includes('number') || h.includes('mobile'));
-        const detectedNameIdx = firstRow.findIndex(h => h.includes('name') || h.includes('first'));
+        for (let r = 0; r < Math.min(5, records.length); r++) {
+            const rowStr = records[r].map(cell => (cell || '').toString().trim().toLowerCase());
+            const detectedPhoneIdx = rowStr.findIndex(h => h.includes('phone') || h.includes('number') || h.includes('mobile'));
+            const detectedNameIdx = rowStr.findIndex(h => h.includes('name') || h.includes('first'));
 
-        if (detectedPhoneIdx !== -1) {
-            phoneIndex = detectedPhoneIdx;
-            if (detectedNameIdx !== -1) nameIndex = detectedNameIdx;
-            startIndex = 1;
-        } else if (records[0].length >= 3) {
-            nameIndex = 2;
-            phoneIndex = 4;
+            if (detectedPhoneIdx !== -1) {
+                phoneIndex = detectedPhoneIdx;
+                if (detectedNameIdx !== -1 && detectedNameIdx !== phoneIndex) nameIndex = detectedNameIdx;
+                startIndex = r + 1;
+            }
         }
 
         const testContacts = [];
