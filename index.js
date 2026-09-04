@@ -18,23 +18,38 @@ const BATCH_PAUSE_MAX = 40000;           // 40 seconds maximum pause after every
 const delay = ms => new Promise(res => setTimeout(res, ms));
 
 // Default text fallbacks if text files are missing
-const DEFAULT_INTRO = `Hi {{name}},
+const DEFAULT_INTRO = `Hey this is Varad from GDG CRCE. We are excited to announce that we are back with our flagship international hackathon BIT N BUILD. Looking forward to see you there!`;
 
-Varad here from GDSC CRCE 
+const DEFAULT_PR_MESSAGE = `*The* _Ultimate Stage_ *to compete against IITs, NITs, and premier global institutions* 🌍
 
-We have received your application for the junior council of 2026-27, we are happy to invite you for the interview round.
-The interview will be conducted offline during the coming week.
+Announcing *Bit N Build '26*, the flagship International Hackathon presented by *Google Developer Groups (GDG)* at Fr. Conceicao Rodrigues College of Engineering, Mumbai.
 
-Kindly let me know your availability so that we can schedule the interview at a convenient time.
+📋Event Details:
+_Phase 1:_ *Maharashtra State Level Hackathon (ONLINE)*
+🗓️ Date: 3rd-4th October, 2026
+👥 Team Size: 2-4 participants 
+💳 Fee: ₹200
+👉 https://shorturl.at/BRGJK
 
-I will be your point of contact throughout the selection process. If you have any questions or require any clarification, please feel free to reach out.
+_Phase 2:_ *Grand Finale (OFFLINE)*
+🗓️ Date: 31st October - 1st November, 2026
+📍 Location: Fr. CRCE, Bandra, Mumbai
+🏆 Prize Pool: ₹1,00,000+ cash prizes
+🔖 Participation Certificates + Goodies for all valid submissions 
 
-We look forward to seeing your best 😊
+💎  Why Join?
+• Compete with IIT, NIT, IIIT & top global institutes. 
+• Get mentored by industry leaders & connect with recruiters
+• Curated merchandise & participation certificates for all valid submissions 
 
-Regards,
-Team GDSC CRCE`;
+Website: https://bitnbuild.gdgcrce.com/
 
-const DEFAULT_PR_MESSAGE = `Hey this is Varad from GDG CRCE. We are excited to announce that we are back with our flagship international hackathon BIT N BUILD. Looking forward to see you there!`;
+📞 Queries: 
+Varad Joshi:  +91 90821 58583
+Kevin Synet:  +91 84468 58648
+Scarlett Menezes: +91 99217 58998
+
+*Register Now!*`;
 
 /**
  * Configure Puppeteer launch options cross-platform (Windows, macOS, Linux).
