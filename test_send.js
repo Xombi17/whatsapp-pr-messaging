@@ -15,6 +15,18 @@ const LOG_FILE = './sent_log.json';
 const delay = ms => new Promise(res => setTimeout(res, ms));
 
 /**
+ * Utility helper for Spintax resolution.
+ * Replaces patterns like "{Hey|Hi|Hello}" with a randomly selected choice per message.
+ */
+function applySpintax(text) {
+    if (!text) return '';
+    return text.replace(/\{([^{}]+)\}/g, (match, choices) => {
+        const options = choices.split('|');
+        return options[Math.floor(Math.random() * options.length)].trim();
+    });
+}
+
+/**
  * Configure Puppeteer launch options cross-platform (Windows, macOS, Linux).
  */
 function getPuppeteerOptions() {
@@ -170,19 +182,64 @@ client.on('ready', async () => {
             process.exit(0);
         }
 
-        // 3. Load Message Files & Media
-        // Step 1 Text: Intro Message
-        let introText = `Hi {{name}},\n\nVarad here from GDSC CRCE \n\nWe have received your application for the junior council of 2026-27, we are happy to invite you for the interview round.\nThe interview will be conducted offline during the coming week.\n\nKindly let me know your availability so that we can schedule the interview at a convenient time.\n\nI will be your point of contact throughout the selection process. If you have any questions or require any clarification, please feel free to reach out.\n\nWe look forward to seeing your best 😊\n\nRegards,\nTeam GDSC CRCE`;
+        // Step 1 Text: Intro Message Variations & Spintax Support
+        let introVariations = [];
+        const defaultIntroFallback = `Hi {{name}},\n\nVarad here from GDSC CRCE \n\nWe have received your application for the junior council of 2026-27, we are happy to invite you for the interview round.\nThe interview will be conducted offline during the coming week.\n\nKindly let me know your availability so that we can schedule the interview at a convenient time.\n\nI will be your point of contact throughout the selection process. If you have any questions or require any clarification, please feel free to reach out.\n\nWe look forward to seeing your best 😊\n\nRegards,\nTeam GDSC CRCE`;
+
         if (fs.existsSync(introFile)) {
-            introText = fs.readFileSync(introFile, 'utf-8').trim();
-            console.log(`📝 Loaded Intro Message from "${introFile}"`);
+            const rawIntro = fs.readFileSync(introFile, 'utf-8').trim();
+            if (rawIntro.includes('---')) {
+                introVariations = rawIntro.split('---').map(s => s.trim()).filter(Boolean);
+                console.log(`📝 Loaded ${introVariations.length} Intro Message variations from "${introFile}" (separated by '---')`);
+            } else {
+                introVariations.push(rawIntro);
+                console.log(`📝 Loaded Intro Message from "${introFile}"`);
+            }
         }
 
-        // Step 2 Caption: PR Message
-        let prMessageText = "Hey this is Varad from GDG CRCE. We are excited to announce that we are back with our flagship international hackathon BIT N BUILD. Looking forward to see you there!";
+        const standaloneIntroFiles = ['./intro1.txt', './intro2.txt', './intro3.txt', './intro_1.txt', './intro_2.txt', './intro_3.txt'];
+        for (const file of standaloneIntroFiles) {
+            if (fs.existsSync(file)) {
+                const content = fs.readFileSync(file, 'utf-8').trim();
+                if (content && !introVariations.includes(content)) {
+                    introVariations.push(content);
+                    console.log(`📝 Loaded additional Intro variation from "${file}"`);
+                }
+            }
+        }
+
+        if (introVariations.length === 0) {
+            introVariations = [defaultIntroFallback];
+        }
+
+        // Step 2 Caption: PR Message Variations & Spintax Support
+        let prVariations = [];
+        const defaultPRFallback = "Hey this is Varad from GDG CRCE. We are excited to announce that we are back with our flagship international hackathon BIT N BUILD. Looking forward to see you there!";
+
         if (fs.existsSync(templateFile)) {
-            prMessageText = fs.readFileSync(templateFile, 'utf-8').trim();
-            console.log(`📝 Loaded PR Message Caption from "${templateFile}"`);
+            const rawTemplate = fs.readFileSync(templateFile, 'utf-8').trim();
+            if (rawTemplate.includes('---')) {
+                prVariations = rawTemplate.split('---').map(s => s.trim()).filter(Boolean);
+                console.log(`📝 Loaded ${prVariations.length} PR Message variations from "${templateFile}" (separated by '---')`);
+            } else {
+                prVariations.push(rawTemplate);
+                console.log(`📝 Loaded PR Message Caption from "${templateFile}"`);
+            }
+        }
+
+        const standaloneTemplateFiles = ['./template1.txt', './template2.txt', './template3.txt', './template_1.txt', './template_2.txt', './template_3.txt'];
+        for (const file of standaloneTemplateFiles) {
+            if (fs.existsSync(file)) {
+                const content = fs.readFileSync(file, 'utf-8').trim();
+                if (content && !prVariations.includes(content)) {
+                    prVariations.push(content);
+                    console.log(`📝 Loaded additional PR Message variation from "${file}"`);
+                }
+            }
+        }
+
+        if (prVariations.length === 0) {
+            prVariations = [defaultPRFallback];
         }
 
         // Step 2 Image: Poster Image
@@ -220,20 +277,23 @@ client.on('ready', async () => {
             try {
                 const isRegistered = await client.isRegisteredUser(chatId);
                 if (!isRegistered) {
-                    console.log(`❌ Number ${number} is NOT registered on WhatsApp. Skipping.`);
+                    console.log(`❌ Number ${number} is NOT registered on WhatsApp. Logging and skipping.`);
+                    sentLogData.push(number);
+                    fs.writeFileSync(LOG_FILE, JSON.stringify(sentLogData, null, 2));
                     continue;
                 }
 
-                let finalIntro = introText;
-                let finalPR = prMessageText;
+                const rawIntro = introVariations[i % introVariations.length];
+                const rawPR = prVariations[i % prVariations.length];
+                let finalIntro = rawIntro;
+                let finalPR = rawPR;
 
-                if (name && name.length) {
-                    finalIntro = finalIntro.replace(/\{\{name\}\}/g, name);
-                    finalPR = finalPR.replace(/\{\{name\}\}/g, name);
-                } else {
-                    finalIntro = finalIntro.replace(/\{\{name\}\}/g, '');
-                    finalPR = finalPR.replace(/\{\{name\}\}/g, '');
-                }
+                // Clean up any residual {{name}} placeholder safely
+                finalIntro = finalIntro.replace(/\{\{name\}\}\s*/g, '');
+                finalPR = finalPR.replace(/\{\{name\}\}\s*/g, '');
+
+                finalIntro = applySpintax(finalIntro);
+                finalPR = applySpintax(finalPR);
 
                 // ── STEP 1: Send Intro Message ─────────────────────────────────────
                 console.log(`📤 [Step 1/3] Sending Intro Text Message to ${number}...`);

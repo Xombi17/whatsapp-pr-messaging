@@ -17,6 +17,19 @@ const BATCH_PAUSE_MAX = 40000;           // 40 seconds maximum pause after every
 // Utility helper for async delays (human-like pacing)
 const delay = ms => new Promise(res => setTimeout(res, ms));
 
+/**
+ * Utility helper for Spintax resolution.
+ * Replaces patterns like "{Hey|Hi|Hello}" with a randomly selected choice per message.
+ */
+function applySpintax(text) {
+    if (!text) return '';
+    return text.replace(/\{([^{}]+)\}/g, (match, choices) => {
+        const options = choices.split('|');
+        return options[Math.floor(Math.random() * options.length)].trim();
+    });
+}
+
+
 // Default text fallbacks if text files are missing
 const DEFAULT_INTRO = `Hey this is Varad from GDG CRCE. We are excited to announce that we are back with our flagship international hackathon BIT N BUILD. Looking forward to see you there!`;
 
@@ -224,21 +237,71 @@ client.on('ready', async () => {
             process.exit(0);
         }
 
-        // Step 1 Text: Intro Message
-        let introText = DEFAULT_INTRO;
+        // Step 1 Text: Intro Message Variations & Spintax Support
+        let introVariations = [];
         const introFile = process.argv[3] || (fs.existsSync('./intro.txt') ? './intro.txt' : null);
+
         if (introFile && fs.existsSync(introFile)) {
-            introText = fs.readFileSync(introFile, 'utf-8').trim();
-            console.log(`📝 Loaded Step 1 Intro Message from "${introFile}"`);
+            const rawIntro = fs.readFileSync(introFile, 'utf-8').trim();
+            if (rawIntro.includes('---')) {
+                introVariations = rawIntro.split('---').map(s => s.trim()).filter(Boolean);
+                console.log(`📝 Loaded ${introVariations.length} Intro Message variations from "${introFile}" (separated by '---')`);
+            } else {
+                introVariations.push(rawIntro);
+                console.log(`📝 Loaded Step 1 Intro Message from "${introFile}"`);
+            }
         }
 
-        // Step 2 Caption: PR Message
-        let prMessageText = DEFAULT_PR_MESSAGE;
-        const templateFile = process.argv[4] || (fs.existsSync('./template.txt') ? './template.txt' : null);
-        if (templateFile && fs.existsSync(templateFile)) {
-            prMessageText = fs.readFileSync(templateFile, 'utf-8').trim();
-            console.log(`📝 Loaded Step 2 PR Message Caption from "${templateFile}"`);
+        // Check for standalone files (intro1.txt, intro2.txt, intro3.txt)
+        const standaloneIntroFiles = ['./intro1.txt', './intro2.txt', './intro3.txt', './intro_1.txt', './intro_2.txt', './intro_3.txt'];
+        for (const file of standaloneIntroFiles) {
+            if (fs.existsSync(file)) {
+                const content = fs.readFileSync(file, 'utf-8').trim();
+                if (content && !introVariations.includes(content)) {
+                    introVariations.push(content);
+                    console.log(`📝 Loaded additional Intro variation from "${file}"`);
+                }
+            }
         }
+
+        if (introVariations.length === 0) {
+            introVariations = [DEFAULT_INTRO];
+        }
+
+        console.log(`ℹ️  Total active Intro Message variations: ${introVariations.length}`);
+
+        // Step 2 Caption: PR Message Variations & Spintax Support
+        let prVariations = [];
+        const templateFile = process.argv[4] || (fs.existsSync('./template.txt') ? './template.txt' : null);
+
+        if (templateFile && fs.existsSync(templateFile)) {
+            const rawTemplate = fs.readFileSync(templateFile, 'utf-8').trim();
+            if (rawTemplate.includes('---')) {
+                prVariations = rawTemplate.split('---').map(s => s.trim()).filter(Boolean);
+                console.log(`📝 Loaded ${prVariations.length} PR Message variations from "${templateFile}" (separated by '---')`);
+            } else {
+                prVariations.push(rawTemplate);
+                console.log(`📝 Loaded Step 2 PR Message Caption from "${templateFile}"`);
+            }
+        }
+
+        // Check for standalone template files (template1.txt, template2.txt, template3.txt)
+        const standaloneTemplateFiles = ['./template1.txt', './template2.txt', './template3.txt', './template_1.txt', './template_2.txt', './template_3.txt'];
+        for (const file of standaloneTemplateFiles) {
+            if (fs.existsSync(file)) {
+                const content = fs.readFileSync(file, 'utf-8').trim();
+                if (content && !prVariations.includes(content)) {
+                    prVariations.push(content);
+                    console.log(`📝 Loaded additional PR Message variation from "${file}"`);
+                }
+            }
+        }
+
+        if (prVariations.length === 0) {
+            prVariations = [DEFAULT_PR_MESSAGE];
+        }
+
+        console.log(`ℹ️  Total active PR Message variations: ${prVariations.length}`);
 
         // Step 2 Image: Poster Image (poster.jpg, poster.png, BNB_Poster.jpg, etc.)
         let posterMedia = null;
@@ -282,18 +345,23 @@ client.on('ready', async () => {
             try {
                 const isRegistered = await client.isRegisteredUser(chatId);
                 if (!isRegistered) {
-                    console.log(`❌ Number ${number} is not registered on WhatsApp. Skipping.`);
+                    console.log(`❌ Number ${number} is not registered on WhatsApp. Logging and skipping.`);
+                    sentLogData.push(number);
+                    fs.writeFileSync(LOG_FILE, JSON.stringify(sentLogData, null, 2));
                 } else {
-                    let finalIntro = introText;
-                    let finalPR = prMessageText;
+                    // Rotate through available intro and PR template variations
+                    const rawIntro = introVariations[i % introVariations.length];
+                    const rawPR = prVariations[i % prVariations.length];
+                    let finalIntro = rawIntro;
+                    let finalPR = rawPR;
 
-                    if (name && name.length) {
-                        finalIntro = finalIntro.replace(/\{\{name\}\}/g, name);
-                        finalPR = finalPR.replace(/\{\{name\}\}/g, name);
-                    } else {
-                        finalIntro = finalIntro.replace(/\{\{name\}\}/g, '');
-                        finalPR = finalPR.replace(/\{\{name\}\}/g, '');
-                    }
+                    // Clean up any residual {{name}} placeholder safely
+                    finalIntro = finalIntro.replace(/\{\{name\}\}\s*/g, '');
+                    finalPR = finalPR.replace(/\{\{name\}\}\s*/g, '');
+
+                    // Apply Spintax resolution (e.g. "{Hey|Hi|Hello}")
+                    finalIntro = applySpintax(finalIntro);
+                    finalPR = applySpintax(finalPR);
 
                     // ── STEP 1: Send Standalone Intro Message ──────────────────────
                     console.log(`📤 [Step 1/3] Sending Intro Text Message to ${number}...`);
