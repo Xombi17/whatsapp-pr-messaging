@@ -113,3 +113,6 @@ sent_log*.json
 check_availability_log.json
 check_availability_log*.json
 
+
+# Local test fixtures
+test_contacts.csv

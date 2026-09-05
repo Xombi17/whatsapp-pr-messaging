@@ -3,6 +3,7 @@ const path = require('path');
 const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
 const { parse } = require('csv-parse/sync');
+const { getContactOptions, saveContact, removeContact, describeContactOptions } = require('./contact_manager');
 
 // Configuration Defaults for the Test Script
 const DEFAULT_CSV = './test_contacts.csv';
@@ -10,6 +11,9 @@ const DEFAULT_INTRO = './intro.txt';
 const DEFAULT_TEMPLATE = './template.txt';
 const DEFAULT_PDF = './BNB_26_Maharashtra_Brochure.pdf';
 const LOG_FILE = './sent_log.json';
+
+// Positional file arguments, ignoring any --flags (e.g. --limit=20, --keep-contacts)
+const ARGS = process.argv.slice(2).filter(a => !a.startsWith('--'));
 
 // Async delay utility helper
 const delay = ms => new Promise(res => setTimeout(res, ms));
@@ -78,10 +82,10 @@ client.on('ready', async () => {
     console.log('\n🧪 [TEST RUNNER] WhatsApp Client authenticated and ready!\n');
 
     try {
-        const csvFile = process.argv[2] || DEFAULT_CSV;
-        const introFile = process.argv[3] || DEFAULT_INTRO;
-        const templateFile = process.argv[4] || DEFAULT_TEMPLATE;
-        const pdfFile = process.argv[5] || DEFAULT_PDF;
+        const csvFile = ARGS[0] || DEFAULT_CSV;
+        const introFile = ARGS[1] || DEFAULT_INTRO;
+        const templateFile = ARGS[2] || DEFAULT_TEMPLATE;
+        const pdfFile = ARGS[3] || DEFAULT_PDF;
 
         // 1. Verify Files Exist
         if (!fs.existsSync(csvFile)) {
@@ -289,12 +293,17 @@ client.on('ready', async () => {
             console.log(`📎 Loaded PDF Brochure from "${pdfFile}" (Display Name: "${pdfMedia.filename}")`);
         }
 
+        // Temporary address-book handling (save before send, delete after)
+        const contactOptions = getContactOptions();
+        console.log(`👤 ${describeContactOptions(contactOptions)}`);
+
         console.log(`\n🚀 Executing 3-Step Sequence for ${contactsToProcess.length} recipient(s):\n 1. Intro Message\n 2. Poster Image + PR Caption\n 3. PDF Brochure Document\n`);
 
         // 4. Execute 3-Step Sequence for each contact
         for (let i = 0; i < contactsToProcess.length; i++) {
             const { number, name } = contactsToProcess[i];
             const chatId = `${number}@c.us`;
+            let savedContact = false;
 
             console.log(`[${i + 1}/${contactsToProcess.length}] Checking WhatsApp registration for number (${number})...`);
 
@@ -318,6 +327,9 @@ client.on('ready', async () => {
 
                 finalIntro = applySpintax(finalIntro);
                 finalPR = applySpintax(finalPR);
+
+                // ── STEP 0: Temporarily save the recipient as a contact ────────
+                savedContact = await saveContact(client, number, name, contactOptions);
 
                 // ── STEP 1: Send Intro Message ─────────────────────────────────────
                 console.log(`📤 [Step 1/3] Sending Intro Text Message to ${number}...`);
@@ -355,6 +367,9 @@ client.on('ready', async () => {
             } catch (err) {
                 console.error(`❌ FAILED for ${number}:`, err.message);
             }
+
+            // Always clean up the temporary contact, even if a send failed above
+            await removeContact(client, number, contactOptions, savedContact);
 
             if (i < contactsToProcess.length - 1) {
                 console.log('⏳ Waiting 5 seconds before next recipient...');

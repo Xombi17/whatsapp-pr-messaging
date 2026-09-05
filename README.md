@@ -137,6 +137,34 @@ node test_send.js test_contacts.csv --limit=5
 
 ---
 
+### Dry Run (no messages sent)
+
+`dry_run.js` runs the real `index.js` logic against a mock WhatsApp client — no QR scan, no browser, nothing delivered. Use it to sanity-check CSV parsing, phone normalisation, spintax coverage and the contact save/delete cycle before touching live numbers.
+
+```bash
+node dry_run.js test_contacts.csv --limit=12 --fast          # index.js pipeline
+node dry_run.js test_contacts.csv --limit=12 --fast --single # send_single.js pipeline
+```
+
+`--fast` collapses all the anti-spam waiting. Drop it to rehearse the real pacing. `DRY_RUN_FAIL_ON=<substring>` forces send failures so you can confirm temporary contacts are still cleaned up.
+
+---
+
+### Temporary Contact Handling
+
+Before messaging each recipient the scripts save them to the WhatsApp address book (`saveOrEditAddressbookContact`), send, then delete the entry again (`deleteAddressbookContact`). Messaging a long run of *unsaved* numbers is one of the behavioural patterns WhatsApp's anti-spam heuristics weight; a saved contact makes the conversation look like an ordinary 1:1 chat. Cleanup runs even if a send fails.
+
+| Flag | Env var | Effect |
+| --- | --- | --- |
+| *(default)* | — | Save before send, delete after |
+| `--no-save-contact` | `SAVE_CONTACTS=false` | Never save; message numbers unsaved |
+| `--keep-contacts` | `KEEP_CONTACTS=true` | Save but keep the entry afterwards |
+| `--sync-addressbook` | `SYNC_ADDRESSBOOK=true` | Also push the entry to your phone's address book |
+
+This reduces risk; it does not eliminate it. Recipient **blocks and spam reports** remain the dominant ban signal — no amount of pacing offsets a list that does not want your message.
+
+---
+
 ## 🛡️ Anti-Ban Best Practices
 
 1. **Daily Volume Limits**: Send in small batches (30–50 contacts per run) using `--limit=50`.
