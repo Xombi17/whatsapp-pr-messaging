@@ -2,4 +2,4 @@
 ---
 {Greetings|Hello|Hey there}! Hope you are doing well. I'm Varad Joshi from Google Developer Groups (GDG) CRCE. We are officially opening registrations for BIT N BUILD '26, our annual flagship international hackathon. Would love to have your team onboard!
 ---
-{Hi|Hey there}! Varad here from GDSC/GDG CRCE. Reaching out to share something big with you. BIT N BUILD '26 is officially here! It's an incredible opportunity to compete, network, and showcase your skills on an international level.
+{Hi|Hey there}! Varad here from GDG CRCE. Reaching out to share something big with you. BIT N BUILD '26 is officially here! It's an incredible opportunity to compete, network, and showcase your skills on an international level.
