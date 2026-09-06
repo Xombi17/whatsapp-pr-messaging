@@ -284,7 +284,7 @@ client.on('ready', async () => {
 
         // Step 1 Text: Intro Message Variations & Spintax Support
         let introVariations = [];
-        const defaultIntroFallback = `Hi {{name}},\n\nVarad here from GDG CRCE \n\nWe have received your application for the junior council of 2026-27, we are happy to invite you for the interview round.\nThe interview will be conducted offline during the coming week.\n\nKindly let me know your availability so that we can schedule the interview at a convenient time.\n\nI will be your point of contact throughout the selection process. If you have any questions or require any clarification, please feel free to reach out.\n\nWe look forward to seeing your best 😊\n\nRegards,\nTeam GDG CRCE`;
+        const defaultIntroFallback = `Hey {{name}}, this is Varad from GDG CRCE. We are excited to announce that we are back with our flagship international hackathon BIT N BUILD. Looking forward to see you there!`;
 
         if (fs.existsSync(introFile)) {
             const rawIntro = fs.readFileSync(introFile, 'utf-8').trim();

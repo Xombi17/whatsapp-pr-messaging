@@ -4,7 +4,7 @@
 [![whatsapp-web.js](https://img.shields.io/badge/whatsapp--web.js-v1.34.6-brightgreen.svg)](https://wwebjs.dev/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-A robust, automated WhatsApp bulk messaging utility built using **Node.js** and **`whatsapp-web.js`**. Designed for student organizations, teams, and committees (e.g., GDG) to automate event announcements, interview invitations, and member updates reliably while maintaining strict anti-spam protections.
+A robust, automated WhatsApp bulk messaging utility built using **Node.js** and **`whatsapp-web.js`**. Designed for student organizations, teams, and committees (e.g., GDG) to automate event announcements, community outreach, and member updates reliably while maintaining strict anti-spam protections.
 
 ---
 
