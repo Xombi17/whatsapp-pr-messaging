@@ -29,6 +29,76 @@ function applySpintax(text) {
     });
 }
 
+/**
+ * Reads sent_log.json supporting both legacy strings and new timestamped objects.
+ * Calculates total contacts in log, set of numbers, and messages sent today.
+ */
+function getSentLogInfo(logFilePath) {
+    let sentLogData = [];
+    if (fs.existsSync(logFilePath)) {
+        try {
+            sentLogData = JSON.parse(fs.readFileSync(logFilePath, 'utf-8'));
+            if (!Array.isArray(sentLogData)) sentLogData = [];
+        } catch (e) {
+            sentLogData = [];
+        }
+    } else {
+        fs.writeFileSync(logFilePath, JSON.stringify([], null, 2));
+    }
+
+    const sentSet = new Set();
+    let sentTodayCount = 0;
+
+    const now = new Date();
+    const todayDateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+
+    for (const item of sentLogData) {
+        let num = '';
+        let itemDateStr = '';
+        let status = 'sent';
+
+        if (typeof item === 'string') {
+            num = item;
+        } else if (item && typeof item === 'object') {
+            num = item.number || '';
+            status = item.status || 'sent';
+            if (item.timestamp) {
+                const d = new Date(item.timestamp);
+                if (!isNaN(d.getTime())) {
+                    itemDateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+                }
+            }
+        }
+
+        if (num) sentSet.add(num);
+        if (itemDateStr === todayDateStr && status === 'sent') {
+            sentTodayCount++;
+        }
+    }
+
+    return { sentLogData, sentSet, sentTodayCount };
+}
+
+/**
+ * Records a timestamped entry to sent_log.json
+ */
+function recordSentLog(logFilePath, sentLogData, number, status = 'sent') {
+    const entry = {
+        number: number,
+        timestamp: new Date().toISOString(),
+        status: status
+    };
+
+    const idx = sentLogData.findIndex(item => (typeof item === 'string' ? item === number : item.number === number));
+    if (idx !== -1) {
+        sentLogData[idx] = entry;
+    } else {
+        sentLogData.push(entry);
+    }
+
+    fs.writeFileSync(logFilePath, JSON.stringify(sentLogData, null, 2));
+}
+
 
 // Default text fallbacks if text files are missing
 const DEFAULT_INTRO = `Hey this is Varad from GDG CRCE. We are excited to announce that we are back with our flagship international hackathon BIT N BUILD. Looking forward to see you there!`;
@@ -196,28 +266,28 @@ client.on('ready', async () => {
             });
         }
 
-        // Initialize or load sent_log.json to prevent duplicate sends
-        let sentLogData = [];
-        if (fs.existsSync(LOG_FILE)) {
-            try {
-                sentLogData = JSON.parse(fs.readFileSync(LOG_FILE, 'utf-8'));
-            } catch (e) {
-                sentLogData = [];
-            }
-        } else {
-            // Automatically create sent_log.json on first run
-            fs.writeFileSync(LOG_FILE, JSON.stringify([], null, 2));
-            console.log(`📄 Created log file "${LOG_FILE}" to track sent contacts.`);
+        // Initialize or load sent_log.json to track contacts and enforce daily safe limit
+        const DAILY_SAFE_LIMIT = 50;
+        const { sentLogData, sentSet, sentTodayCount } = getSentLogInfo(LOG_FILE);
+
+        console.log(`📊 Total Messages Sent Today (${new Date().toLocaleDateString()}): ${sentTodayCount} / ${DAILY_SAFE_LIMIT}`);
+
+        const remainingDailyQuota = DAILY_SAFE_LIMIT - sentTodayCount;
+        if (remainingDailyQuota <= 0) {
+            console.log(`🚫 Daily safe limit of ${DAILY_SAFE_LIMIT} messages reached for today. Stopping execution to protect your WhatsApp account.`);
+            await client.destroy();
+            process.exit(0);
         }
-        const sentLog = new Set(sentLogData);
+
+        console.log(`🛡️  Remaining Daily Quota: ${remainingDailyQuota} message(s) available for today.`);
 
         // Filter out contacts that were already messaged in previous runs
         const uniqueContacts = [];
         let skippedCount = 0;
         for (const contact of allContacts) {
-            if (!sentLog.has(contact.number)) {
+            if (!sentSet.has(contact.number)) {
                 uniqueContacts.push(contact);
-                sentLog.add(contact.number); // Prevent intra-CSV duplicates
+                sentSet.add(contact.number); // Prevent intra-CSV duplicates
             } else {
                 skippedCount++;
             }
@@ -235,7 +305,7 @@ client.on('ready', async () => {
             process.exit(0);
         }
 
-        // Determine max contacts limit for this run (--limit=50 or LIMIT=50)
+        // Determine max contacts limit for this run (--limit=50 or LIMIT=50 or remainingDailyQuota)
         let maxLimit = 50; // Default limit per run
         const limitArg = process.argv.find(arg => arg.startsWith('--limit='));
         if (limitArg) {
@@ -254,12 +324,15 @@ client.on('ready', async () => {
             }
         }
 
+        // Cap run limit by remaining daily quota to ensure daily 50 message safety limit is never exceeded
+        const effectiveLimit = Math.min(maxLimit, remainingDailyQuota);
+
         let contactsToProcess = [...uniqueContacts];
-        if (maxLimit < contactsToProcess.length) {
-            console.log(`🎯 Limit Applied: Processing first ${maxLimit} contacts out of ${uniqueContacts.length} available for this run.`);
-            contactsToProcess = contactsToProcess.slice(0, maxLimit);
+        if (effectiveLimit < contactsToProcess.length) {
+            console.log(`🎯 Safe Limit Applied: Processing first ${effectiveLimit} contact(s) out of ${uniqueContacts.length} available for this run (Daily Cap: ${DAILY_SAFE_LIMIT}).`);
+            contactsToProcess = contactsToProcess.slice(0, effectiveLimit);
         } else {
-            console.log(`🎯 Limit: Processing all ${contactsToProcess.length} contact(s) for this run.`);
+            console.log(`🎯 Processing ${contactsToProcess.length} contact(s) for this run (Daily Cap: ${DAILY_SAFE_LIMIT}).`);
         }
 
         console.log(`⚙️  Batch Configuration: ${BATCH_SIZE} contacts/batch, 2-5s contact delay, 30-40s batch pause\n`);
@@ -373,8 +446,7 @@ client.on('ready', async () => {
                 const isRegistered = await client.isRegisteredUser(chatId);
                 if (!isRegistered) {
                     console.log(`❌ Number ${number} is not registered on WhatsApp. Logging and skipping.`);
-                    sentLogData.push(number);
-                    fs.writeFileSync(LOG_FILE, JSON.stringify(sentLogData, null, 2));
+                    recordSentLog(LOG_FILE, sentLogData, number, 'unregistered');
                 } else {
                     // Rotate through available intro and PR template variations
                     const rawIntro = introVariations[i % introVariations.length];
@@ -390,7 +462,19 @@ client.on('ready', async () => {
                     finalIntro = applySpintax(finalIntro);
                     finalPR = applySpintax(finalPR);
 
+                    // Get chat object for presence & typing simulation
+                    let chat = null;
+                    try {
+                        chat = await client.getChatById(chatId);
+                    } catch (e) {}
+
                     // ── STEP 1: Send Standalone Intro Message ──────────────────────
+                    if (chat) {
+                        console.log(`💬 Simulating human typing indicator for ${number}...`);
+                        try { await chat.sendStateTyping(); } catch (e) {}
+                        await delay(2000 + Math.floor(Math.random() * 2000)); // 2-4s typing delay
+                    }
+
                     console.log(`📤 [Step 1/3] Sending Intro Text Message to ${number}...`);
                     await client.sendMessage(chatId, finalIntro);
                     console.log(`✅ Step 1: Intro Message sent to ${number}`);
@@ -417,9 +501,8 @@ client.on('ready', async () => {
                         console.log(`✅ Step 3: PDF Brochure Document sent to ${number}`);
                     }
 
-                    // Log sent contact immediately to sent_log.json
-                    sentLogData.push(number);
-                    fs.writeFileSync(LOG_FILE, JSON.stringify(sentLogData, null, 2));
+                    // Log sent contact immediately to sent_log.json with timestamp
+                    recordSentLog(LOG_FILE, sentLogData, number, 'sent');
                 }
             } catch (err) {
                 console.error(`❌ Failed to send to ${number}:`, err.message);
