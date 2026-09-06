@@ -3,9 +3,13 @@ const path = require('path');
 const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
 const { parse } = require('csv-parse/sync');
+const { getContactOptions, saveContact, removeContact, describeContactOptions } = require('./contact_manager');
 
 // Log file to track sent messages and avoid duplicates across runs
 const LOG_FILE = './sent_log.json';
+
+// Positional file arguments, ignoring any --flags (e.g. --limit=20, --keep-contacts)
+const ARGS = process.argv.slice(2).filter(a => !a.startsWith('--'));
 
 // Rate Limiting & Batching Configuration
 const BATCH_SIZE = 5;                   // Process 5 contacts per batch
@@ -117,7 +121,7 @@ client.on('ready', async () => {
 
     try {
         // Determine input CSV file path
-        const csvFile = process.argv[2] || (fs.existsSync('./contacts.csv') ? './contacts.csv' : null);
+        const csvFile = ARGS[0] || (fs.existsSync('./contacts.csv') ? './contacts.csv' : null);
 
         if (!csvFile) {
             console.error('❌ Error: No CSV file provided!');
@@ -266,7 +270,7 @@ client.on('ready', async () => {
 
         // Step 1 Text: Intro Message Variations & Spintax Support
         let introVariations = [];
-        const introFile = process.argv[3] || (fs.existsSync('./intro.txt') ? './intro.txt' : null);
+        const introFile = ARGS[1] || (fs.existsSync('./intro.txt') ? './intro.txt' : null);
 
         if (introFile && fs.existsSync(introFile)) {
             const rawIntro = fs.readFileSync(introFile, 'utf-8').trim();
@@ -299,7 +303,7 @@ client.on('ready', async () => {
 
         // Step 2 Caption: PR Message Variations & Spintax Support
         let prVariations = [];
-        const templateFile = process.argv[4] || (fs.existsSync('./template.txt') ? './template.txt' : null);
+        const templateFile = ARGS[2] || (fs.existsSync('./template.txt') ? './template.txt' : null);
 
         if (templateFile && fs.existsSync(templateFile)) {
             const rawTemplate = fs.readFileSync(templateFile, 'utf-8').trim();
@@ -333,7 +337,7 @@ client.on('ready', async () => {
         // Step 2 Image: Poster Image (poster.jpg, poster.png, BNB_Poster.jpg, etc.)
         let posterMedia = null;
         const posterCandidates = ['./poster.jpg', './poster.png', './poster.jpeg', './BNB_Poster.jpg', './BNB_Poster.png'];
-        const customPosterArg = process.argv[6];
+        const customPosterArg = ARGS[4];
         let posterPath = customPosterArg;
 
         if (!posterPath) {
@@ -353,12 +357,16 @@ client.on('ready', async () => {
         // Step 3 Document: PDF Brochure
         let pdfMedia = null;
         const defaultBnbPdf = './BNB_26_Maharashtra_Brochure.pdf';
-        const pdfArg = process.argv[5] || (fs.existsSync(defaultBnbPdf) ? defaultBnbPdf : null);
+        const pdfArg = ARGS[3] || (fs.existsSync(defaultBnbPdf) ? defaultBnbPdf : null);
         if (pdfArg && fs.existsSync(pdfArg)) {
             pdfMedia = MessageMedia.fromFilePath(pdfArg);
             pdfMedia.filename = "BNB'26 Maharashtra Brochure.pdf";
             console.log(`📎 Loaded Step 3 PDF Brochure: "${pdfArg}" (WhatsApp Display Title: "${pdfMedia.filename}")`);
         }
+
+        // Temporary address-book handling (save before send, delete after)
+        const contactOptions = getContactOptions();
+        console.log(`👤 ${describeContactOptions(contactOptions)}`);
 
         console.log(`\n🚀 Executing 3-Step Delivery Sequence for ${contactsToProcess.length} recipient(s):\n 1. Intro Message\n 2. Poster Image + Attached PR Caption\n 3. PDF Brochure Document\n`);
 
@@ -366,6 +374,7 @@ client.on('ready', async () => {
         for (let i = 0; i < contactsToProcess.length; i++) {
             const { number, name } = contactsToProcess[i];
             const chatId = `${number}@c.us`;
+            let savedContact = false;
 
             console.log(`[${i + 1}/${contactsToProcess.length}] Processing number (${number})...`);
 
@@ -389,6 +398,9 @@ client.on('ready', async () => {
                     // Apply Spintax resolution (e.g. "{Hey|Hi|Hello}")
                     finalIntro = applySpintax(finalIntro);
                     finalPR = applySpintax(finalPR);
+
+                    // ── STEP 0: Temporarily save the recipient as a contact ───────
+                    savedContact = await saveContact(client, number, name, contactOptions);
 
                     // ── STEP 1: Send Standalone Intro Message ──────────────────────
                     console.log(`📤 [Step 1/3] Sending Intro Text Message to ${number}...`);
@@ -424,6 +436,9 @@ client.on('ready', async () => {
             } catch (err) {
                 console.error(`❌ Failed to send to ${number}:`, err.message);
             }
+
+            // Always clean up the temporary contact, even if a send failed above
+            await removeContact(client, number, contactOptions, savedContact);
 
             // Check if we reached the end of a 5-contact batch (and not at the very last contact)
             const isBatchEnd = (i + 1) % BATCH_SIZE === 0;
