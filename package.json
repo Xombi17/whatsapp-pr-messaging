@@ -1,7 +1,7 @@
 {
   "name": "whatsapp-bulk-messenger",
   "version": "1.0.0",
-  "description": "Automated WhatsApp bulk messaging tool built with Node.js and whatsapp-web.js for GDSC event PR broadcasts",
+  "description": "Automated WhatsApp bulk messaging tool built with Node.js and whatsapp-web.js for GDG event PR broadcasts",
   "main": "index.js",
   "scripts": {
     "start": "node index.js contacts.csv",
@@ -17,10 +17,10 @@
     "bulk-messaging",
     "whatsapp-web.js",
     "automation",
-    "gdsc",
+    "GDG",
     "bnb"
   ],
-  "author": "GDSC Team",
+  "author": "GDG Team",
   "license": "MIT",
   "type": "commonjs",
   "bugs": {

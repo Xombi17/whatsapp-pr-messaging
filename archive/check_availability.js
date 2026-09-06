@@ -39,7 +39,7 @@ Thank you, and we look forward to hearing from you.
 
 Regards,
 Varad Joshi
-Team GDSC CRCE`;
+Team GDG CRCE`;
 
 function getPuppeteerOptions() {
     const options = {

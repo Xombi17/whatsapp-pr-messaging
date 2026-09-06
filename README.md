@@ -4,7 +4,7 @@
 [![whatsapp-web.js](https://img.shields.io/badge/whatsapp--web.js-v1.34.6-brightgreen.svg)](https://wwebjs.dev/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-A robust, automated WhatsApp bulk messaging utility built using **Node.js** and **`whatsapp-web.js`**. Designed for student organizations, teams, and committees (e.g., GDSC) to automate event announcements, interview invitations, and member updates reliably while maintaining strict anti-spam protections.
+A robust, automated WhatsApp bulk messaging utility built using **Node.js** and **`whatsapp-web.js`**. Designed for student organizations, teams, and committees (e.g., GDG) to automate event announcements, interview invitations, and member updates reliably while maintaining strict anti-spam protections.
 
 ---
 
@@ -71,7 +71,7 @@ Phone
 919876543211
 ```
 
-* **Phone Number Normalization**: 10-digit Indian numbers automatically receive the `91` country code.
+- **Phone Number Normalization**: 10-digit Indian numbers automatically receive the `91` country code.
 
 ---
 
@@ -80,15 +80,17 @@ Phone
 To prevent WhatsApp from flagging identical text across hundreds of contacts, add **Spintax** and **multi-intro variations** in `intro.txt` and `template.txt`.
 
 #### Example `intro.txt` (3 Rotated Variations with Spintax):
+
 ```text
 {Hey|Hi|Hello}! This is Varad from GDG CRCE. We saw that you are part of active tech/hackathon communities. We are {excited|thrilled} to announce BIT N BUILD '26!
 ---
 {Greetings|Hello|Hey there}! Hope you are doing well. Varad Joshi here from GDG CRCE. We are officially opening registrations for BIT N BUILD '26.
 ---
-{Hi|Hey there}! Varad here from GDSC/GDG CRCE. Reaching out with an exciting opportunity for BIT N BUILD '26!
+{Hi|Hey there}! Varad here from GDG/GDG CRCE. Reaching out with an exciting opportunity for BIT N BUILD '26!
 ```
 
 #### Example `template.txt` (PR Caption with Spintax):
+
 ```text
 *{The|Our}* _Ultimate Stage_ *to compete against IITs, NITs, and premier global institutions* 🌍
 
